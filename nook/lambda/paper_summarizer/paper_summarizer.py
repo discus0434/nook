@@ -2,10 +2,12 @@ import concurrent.futures
 import inspect
 import os
 import re
+import json
 import traceback
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pprint import pprint
+import base64
 from typing import Any
 
 import arxiv
@@ -386,15 +388,68 @@ class PaperSummarizer:
         )
 
 
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     pprint(event)
+    is_trigger_event = False
 
     try:
         if event.get("source") == "aws.events":
+            is_trigger_event = True
+            print("Invocation source: EventBridge")
+        elif "requestContext" in event and event.get("requestContext", {}).get("http", {}).get("method") == "POST":
+            print("Invocation source: Function URL (POST)")
+            body_str = event.get("body", "{}")
+            if event.get("isBase64Encoded", False):
+                print("Decoding Base64 body")
+                try:
+                    body_str = base64.b64decode(body_str).decode('utf-8')
+                except (base64.binascii.Error, UnicodeDecodeError) as e:
+                    print(f"Failed to decode Base64 body: {e}")
+                    body_str = "{}"
+            print(f"Parsed body string: {body_str[:200]}...")
+            try:
+                body_json = json.loads(body_str)
+                if body_json.get("source") == "aws.events":
+                    print("Found 'source: aws.events' in request body.")
+                    is_trigger_event = True
+                else:
+                    print("Request body did not contain 'source: aws.events'.")
+            except json.JSONDecodeError as e:
+                print(f"Failed to decode JSON body: {e}")
+                print(f"Body content was: {body_str}")
+
+        if is_trigger_event:
+            print("Triggering PaperSummarizer job...")
             paper_summarizer_ = PaperSummarizer()
             paper_summarizer_()
-        return {"statusCode": 200}
+            print("PaperSummarizer job finished.")
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": "PaperSummarizer triggered successfully"})
+            }
+        else:
+             print("Invocation source not recognized or payload mismatch. No action taken.")
+             if "requestContext" in event:
+                 return {
+                     "statusCode": 400,
+                     "headers": {"Content-Type": "application/json"},
+                     "body": json.dumps({"message": "Invalid request: Expected 'source: aws.events' in POST body"})
+                 }
+             else:
+                 return {"statusCode": 400}
+
     except Exception as e:
+        print("An error occurred during execution:")
         pprint(traceback.format_exc())
-        pprint(e)
-        return {"statusCode": 500}
+        # Return an error appropriate for Function URL if applicable
+        if "requestContext" in event:
+            return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": f"Internal server error: {e}"})
+            }
+        else:
+            # For non-HTTP triggers
+            return {"statusCode": 500}

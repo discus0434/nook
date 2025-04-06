@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import date
 from pprint import pprint
 from typing import Any
+import json
+import base64
 
 import boto3
 import requests
@@ -46,6 +48,9 @@ class HackerNewsRetriever:
 
     def __call__(self) -> None:
         stories = self._get_top_stories()
+        if not stories:
+            print("No suitable stories found on Hacker News.")
+            return
         styled_attachments = [self._stylize_story(story) for story in stories]
         self._store_summaries(styled_attachments)
 
@@ -117,6 +122,9 @@ class HackerNewsRetriever:
         ).json()
 
     def _cleanse_text(self, text: str) -> str:
+        # Added check for None or empty string
+        if not text:
+            return ""
         return BeautifulSoup(text, "html.parser").get_text()
 
     def _store_summaries(self, summaries: list[str]) -> None:
@@ -170,16 +178,66 @@ class HackerNewsRetriever:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     pprint(event)
+    is_trigger_event = False
 
     try:
-        # if the lambda is invoked by a cron job,
-        # call the paper summarizer without any incoming text
+        # Check for EventBridge trigger
         if event.get("source") == "aws.events":
+            is_trigger_event = True
+            print("Invocation source: EventBridge")
+        # Check for Function URL trigger (or API Gateway)
+        elif "requestContext" in event and event.get("requestContext", {}).get("http", {}).get("method") == "POST":
+            print("Invocation source: Function URL (POST)")
+            body_str = event.get("body", "{}")
+            if event.get("isBase64Encoded", False):
+                print("Decoding Base64 body")
+                try:
+                    body_str = base64.b64decode(body_str).decode('utf-8')
+                except (base64.binascii.Error, UnicodeDecodeError) as e:
+                    print(f"Failed to decode Base64 body: {e}")
+                    body_str = "{}"
+            print(f"Parsed body string: {body_str[:200]}...")
+            try:
+                body_json = json.loads(body_str)
+                if body_json.get("source") == "aws.events":
+                    print("Found 'source: aws.events' in request body.")
+                    is_trigger_event = True
+                else:
+                    print("Request body did not contain 'source: aws.events'.")
+            except json.JSONDecodeError as e:
+                print(f"Failed to decode JSON body: {e}")
+                print(f"Body content was: {body_str}")
+
+        if is_trigger_event:
+            print("Triggering HackerNewsRetriever job...")
             retriever = HackerNewsRetriever()
             retriever()
+            print("HackerNewsRetriever job finished.")
+            # Return success response compatible with Function URL
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": "HackerNewsRetriever triggered successfully"})
+            }
+        else:
+            print("Invocation source not recognized or payload mismatch. No action taken.")
+            if "requestContext" in event:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"message": "Invalid request: Expected 'source: aws.events' in POST body"})
+                }
+            else:
+                return {"statusCode": 400}
 
-        return {"statusCode": 200}
     except Exception as e:
+        print("An error occurred during execution:")
         pprint(traceback.format_exc())
-        pprint(e)
-        return {"statusCode": 500}
+        if "requestContext" in event:
+            return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": f"Internal server error: {e}"})
+            }
+        else:
+            return {"statusCode": 500}

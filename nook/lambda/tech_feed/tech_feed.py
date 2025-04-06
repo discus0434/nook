@@ -5,6 +5,8 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
+import json
+import base64
 
 import boto3
 import feedparser
@@ -144,18 +146,25 @@ class TechFeed:
         )
 
     def _summarize_article(self, article: Article) -> str:
-        return self._client.generate_content(
-            contents=self._contents_format.format(
-                title=article.title, text=article.text
-            ),
-            system_instruction=self._system_instruction,
-        )
+        if not article.text or article.text.isspace():
+             print(f"Skipping summarization for {article.url} due to empty content.")
+             return "Content could not be retrieved or was empty."
+        try:
+            return self._client.generate_content(
+                contents=self._contents_format.format(
+                    title=article.title, text=article.text[:20000]
+                ),
+                system_instruction=self._system_instruction,
+            )
+        except Exception as e:
+            print(f"Error during summarization for {article.url}: {e}")
+            return f"Error summarizing content: {e}"
 
     @property
     def _system_instruction(self) -> str:
         return inspect.cleandoc(
             """
-            ユーザーから記事のタイトルと文章が与えられるので、内容をよく読み、日本語で詳細な要約を作成してください。
+            ユーザーから記事のタイトルと文章が与えられるので、内容をよく読み、日本語でとても詳細な要約を作成してください。
             与えられる文章はHTMLから抽出された文章なので、一部情報が欠落していたり、数式、コード、不必要な文章などが含まれている場合があります。
             要約以外の出力は不要です。
             """
@@ -175,14 +184,66 @@ class TechFeed:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     print(event)
+    is_trigger_event = False
 
     try:
         if event.get("source") == "aws.events":
+            is_trigger_event = True
+            print("Invocation source: EventBridge")
+        elif "requestContext" in event and event.get("requestContext", {}).get("http", {}).get("method") == "POST":
+            print("Invocation source: Function URL (POST)")
+            body_str = event.get("body", "{}")
+            if event.get("isBase64Encoded", False):
+                print("Decoding Base64 body")
+                try:
+                    body_str = base64.b64decode(body_str).decode('utf-8')
+                except (base64.binascii.Error, UnicodeDecodeError) as e:
+                    print(f"Failed to decode Base64 body: {e}")
+                    body_str = "{}"
+
+            print(f"Parsed body string: {body_str[:200]}...")
+
+            try:
+                body_json = json.loads(body_str)
+                if body_json.get("source") == "aws.events":
+                    print("Found 'source: aws.events' in request body.")
+                    is_trigger_event = True
+                else:
+                    print("Request body did not contain 'source: aws.events'.")
+            except json.JSONDecodeError as e:
+                print(f"Failed to decode JSON body: {e}")
+                print(f"Body content was: {body_str}")
+
+        if is_trigger_event:
+            print("Triggering TechFeed job...")
             tech_feed_ = TechFeed()
             tech_feed_()
+            print("TechFeed job finished.")
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": "TechFeed triggered successfully"})
+            }
+        else:
+            print("Invocation source not recognized or payload mismatch. No action taken.")
+            if "requestContext" in event:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"message": "Invalid request: Expected 'source: aws.events' in POST body"})
+                }
+            else:
+                print("Returning 400 for unrecognized non-HTTP invocation.")
+                return {"statusCode": 400}
 
-        return {"statusCode": 200}
     except Exception as e:
+        print("An error occurred during execution:")
         print(traceback.format_exc())
-        print(e)
-        return {"statusCode": 500}
+        if "requestContext" in event:
+             return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": f"Internal server error: {e}"})
+            }
+        else:
+            return {"statusCode": 500}

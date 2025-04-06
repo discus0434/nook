@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal
 import time
+import json
+import base64
 
 import boto3
 import praw
@@ -255,13 +257,66 @@ class RedditExplorer:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     print(event)
+    is_trigger_event = False
 
     try:
+        # Check for EventBridge trigger
         if event.get("source") == "aws.events":
+            is_trigger_event = True
+            print("Invocation source: EventBridge")
+        # Check for Function URL trigger (or API Gateway)
+        elif "requestContext" in event and event.get("requestContext", {}).get("http", {}).get("method") == "POST":
+            print("Invocation source: Function URL (POST)")
+            body_str = event.get("body", "{}")
+            if event.get("isBase64Encoded", False):
+                print("Decoding Base64 body")
+                try:
+                    body_str = base64.b64decode(body_str).decode('utf-8')
+                except (base64.binascii.Error, UnicodeDecodeError) as e:
+                    print(f"Failed to decode Base64 body: {e}")
+                    body_str = "{}"
+            print(f"Parsed body string: {body_str[:200]}...")
+            try:
+                body_json = json.loads(body_str)
+                if body_json.get("source") == "aws.events":
+                    print("Found 'source: aws.events' in request body.")
+                    is_trigger_event = True
+                else:
+                    print("Request body did not contain 'source: aws.events'.")
+            except json.JSONDecodeError as e:
+                print(f"Failed to decode JSON body: {e}")
+                print(f"Body content was: {body_str}")
+
+        if is_trigger_event:
+            print("Triggering RedditExplorer job...")
             reddit_explorer_ = RedditExplorer()
             reddit_explorer_()
-        return {"statusCode": 200}
+            print("RedditExplorer job finished.")
+            # Return success response compatible with Function URL
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": "RedditExplorer triggered successfully"})
+            }
+        else:
+            print("Invocation source not recognized or payload mismatch. No action taken.")
+            if "requestContext" in event:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"message": "Invalid request: Expected 'source: aws.events' in POST body"})
+                }
+            else:
+                return {"statusCode": 400}
+
     except Exception as e:
+        print("An error occurred during execution:")
         print(traceback.format_exc())
-        print(e)
-        return {"statusCode": 500}
+        if "requestContext" in event:
+            return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"message": f"Internal server error: {e}"})
+            }
+        else:
+            return {"statusCode": 500}

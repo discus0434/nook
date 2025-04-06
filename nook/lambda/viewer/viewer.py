@@ -1,11 +1,12 @@
 import datetime
 import os
 import re
+import json
 
 import boto3
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from gemini_client import create_client
@@ -17,6 +18,7 @@ templates = Jinja2Templates(directory="templates")
 # S3バケット名は環境変数から取得
 BUCKET_NAME = os.environ.get("BUCKET_NAME")
 s3_client = boto3.client("s3")
+lambda_client = boto3.client("lambda")
 gemini_model = "gemini-2.0-flash"
 
 # 対象のアプリ名リスト
@@ -27,6 +29,12 @@ app_names = [
     "reddit_explorer",
     "tech_feed",
 ]
+
+# 各Lambda関数のARNを環境変数から取得 ( FUNCTION_URLS は不要に)
+FUNCTION_ARNS = {
+    app_name: os.environ.get(f"{app_name.upper()}_FUNCTION_ARN")
+    for app_name in app_names
+}
 
 # 天気アイコンの対応表
 WEATHER_ICONS = {
@@ -138,28 +146,37 @@ def fetch_url_content(url: str) -> str | None:
         return None
 
 
-def fetch_markdown(app_name: str, date_str: str) -> str:
+def fetch_markdown(app_name: str, date_str: str) -> str | None:
     """
-    指定されたアプリ名と日付のS3上のMarkdownファイルを取得し、
-    MarkdownをHTMLに変換して返す。
+    指定されたアプリ名と日付のS3上のMarkdownファイルを取得して返す。
+    ファイルが存在しない場合は None を返す。
     """
     key = f"{app_name}/{date_str}.md"
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
         md_content = response["Body"].read().decode("utf-8")
-        # デバッグ用にMarkdownの内容をログに出力
-        print(f"Fetched markdown for {key}:")
-        print(md_content[:500])  # 最初の500文字だけ表示
+        print(f"Successfully fetched markdown for {key}")
+        # print(md_content[:500]) # Optional debug logging
         return md_content
+    except s3_client.exceptions.NoSuchKey:
+        print(f"Markdown file not found for {key}")
+        return None
     except Exception as e:
-        return f"Error fetching {key}: {e}"
+        print(f"Error fetching {key}: {e}")
+        return f"Error fetching content: {e}" # Return error string on other errors
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, date: str = None):
     if date is None:
         date = datetime.date.today().strftime("%Y-%m-%d")
-    contents = {name: fetch_markdown(name, date) for name in app_names}
+
+    contents = {}
+    markdown_exists = {}
+    for name in app_names:
+        content = fetch_markdown(name, date)
+        contents[name] = content if content is not None else ""
+        markdown_exists[name] = content is not None and not content.startswith("Error fetching")
 
     # 天気データを取得
     weather_data = get_weather_data()
@@ -172,6 +189,7 @@ async def index(request: Request, date: str = None):
             "date": date,
             "app_names": app_names,
             "weather_data": weather_data,
+            "markdown_exists": markdown_exists, # Markdownの存在有無を渡す
         },
     )
 
@@ -246,8 +264,68 @@ async def chat(topic_id: str, request: Request):
     return {"response": response_text}
 
 
+# Endpoint to fetch markdown content for a specific app and date
+@app.get("/api/markdown/{app_name}")
+async def get_markdown_content(app_name: str, date: str = None):
+    if date is None:
+        date = datetime.date.today().strftime("%Y-%m-%d")
+    if app_name not in app_names:
+        raise HTTPException(status_code=404, detail="App not found")
+
+    content = fetch_markdown(app_name, date)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Markdown content not found")
+    elif content.startswith("Error fetching"):
+        raise HTTPException(status_code=500, detail=content) # Propagate fetch error
+    else:
+        return {"markdown": content}
+
+
 # AWS Lambda上でFastAPIを実行するためのハンドラ
 lambda_handler = Mangum(app)
+
+
+@app.post("/retry/{app_name}")
+async def retry_job(app_name: str):
+    if app_name not in FUNCTION_ARNS or not FUNCTION_ARNS[app_name]:
+        raise HTTPException(status_code=404, detail="Function ARN not found")
+
+    function_arn = FUNCTION_ARNS[app_name]
+    # Payload for EventBridge-triggered Lambda functions
+    payload = json.dumps({"source": "aws.events"})
+
+    try:
+        print(f"Attempting to invoke {app_name} ({function_arn}) asynchronously...")
+        # Invoke the target Lambda function asynchronously
+        response = lambda_client.invoke(
+            FunctionName=function_arn,
+            InvocationType='Event', # Asynchronous invocation
+            Payload=payload
+        )
+
+        # Check the status code from the invoke call itself
+        if response.get("StatusCode") == 202:
+             print(f"Successfully invoked {app_name} asynchronously. Status: 202")
+             return JSONResponse(
+                 status_code=202,
+                 content={"message": f"Job trigger for {app_name} accepted. Processing started."}
+             )
+        else:
+            # This case might indicate an issue with the invoke call itself (permissions, etc.)
+            print(f"Failed to invoke {app_name}. Status: {response.get('StatusCode')}, FunctionError: {response.get('FunctionError')}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to invoke Lambda function {app_name}. Status: {response.get('StatusCode')}"
+            )
+
+    except lambda_client.exceptions.ResourceNotFoundException:
+        print(f"Error invoking {app_name}: Lambda function not found.")
+        raise HTTPException(status_code=404, detail=f"Lambda function {app_name} not found.")
+    except Exception as e:
+        # Catch other potential boto3 or general errors
+        print(f"Error invoking function ARN for {app_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger {app_name}: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn

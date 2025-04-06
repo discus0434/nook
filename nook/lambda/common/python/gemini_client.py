@@ -13,7 +13,6 @@ from google.genai import types
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 from google.genai.errors import APIError
 import logging
-import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
