@@ -639,6 +639,21 @@
   </style>
 </head>
 <body>
+  <!-- Toast Container -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="toast-header">
+        <img src="https://api.dicebear.com/7.x/shapes/svg?seed=nook" class="rounded me-2" alt="nook icon" width="20" height="20">
+        <strong class="me-auto">nook</strong>
+        <small>Just now</small>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body">
+        <!-- Message will be inserted here -->
+      </div>
+    </div>
+  </div>
+
   <!-- ナビゲーションバー -->
   <nav class="navbar">
     <div class="container">
@@ -687,7 +702,7 @@
               'tech_feed': 'Tech'
             } %}
             {% for app in app_names %}
-            <li class="nav-item" role="presentation">
+            <li class="nav-item d-flex align-items-center" role="presentation">
               <button class="nav-link {% if loop.first %}active{% endif %}" id="{{ app }}-tab"
                       data-bs-toggle="tab" data-bs-target="#{{ app }}" type="button" role="tab"
                       aria-controls="{{ app }}" aria-selected="{% if loop.first %}true{% else %}false{% endif %}">
@@ -700,6 +715,19 @@
             {% for app in app_names %}
             <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="{{ app }}" role="tabpanel" aria-labelledby="{{ app }}-tab">
               <div class="mt-3">
+                <!-- Add button inside the tab content if markdown doesn't exist -->
+                {% if not markdown_exists[app] %}
+                <div class="alert alert-warning d-flex justify-content-between align-items-center" role="alert" id="alert-{{ app }}">
+                  Content for {{ date }} not found.
+                  <button class="btn btn-sm btn-primary retry-button" data-app-name="{{ app }}" title="Retry {{ tab_names[app] }} job">
+                    Retry Now
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="bi bi-arrow-clockwise ms-1" viewBox="0 0 16 16">
+                      <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                      <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                    </svg>
+                  </button>
+                </div>
+                {% endif %}
                 <!-- raw Markdown を hidden な <textarea> に格納 -->
                 <textarea id="raw-{{ app }}" style="display: none;">{{ contents[app] | safe }}</textarea>
                 <!-- marked.js による変換後の HTML を出力する領域 -->
@@ -735,21 +763,19 @@
         headerIds: true
       });
 
-      // カスタムレンダラーを作成
-      const renderer = new marked.Renderer();
+      // Declare global variables before functions that use them
+      const headingCounters = {};
+      const renderer = new marked.Renderer(); // Global renderer for images/links
 
-      // 画像のレンダリングをカスタマイズ
+      // Customize global image/link renderers (keep existing logic)
       renderer.image = function(href, title, text) {
         try {
           let url = href;
           if (typeof href === 'object') {
-            // オブジェクトの場合、標準のキーからURLを取得
             url = href.href || href.url || href.raw;
-            // それでも取得できなければ string 化を試みる
             if (!url && typeof href.toString === 'function') {
               url = href.toString();
             }
-            // Markdown形式のリンクパターンがあれば抽出
             if (url && typeof url === 'string' && url.match(/\[(.*?)\]\((.*?)\)/)) {
               const matches = url.match(/\[(.*?)\]\((.*?)\)/);
               url = matches[2];
@@ -759,7 +785,6 @@
             console.warn('Invalid url in image renderer:', href);
             return '';
           }
-          // テキストをトリムして、"Video"なら動画として処理
           const cleanText = text ? text.trim() : '';
           if (cleanText === 'Video') {
             return `
@@ -776,8 +801,6 @@
           return '';
         }
       };
-
-      // リンクのレンダリングをカスタマイズ
       renderer.link = function(href, title, text) {
         let url = href;
         let displayText = text;
@@ -806,129 +829,135 @@
         const titleAttr = title ? ` title="${title}"` : '';
         return `<a href="${finalUrl}" target="_blank" rel="noopener noreferrer"${titleAttr}>${displayText || url}</a>`;
       };
-
-      // ヘッディングのレンダリングをカスタマイズ
       renderer.heading = function(text, level, raw) {
         try {
-          // デバッグ情報
-          console.log(`Base renderer heading: text=${text}, level=${level}, raw=${raw}`);
-
-          // levelが未定義または1-6の範囲外の場合、デフォルト値を設定
           if (level === undefined || level === null || isNaN(level) || level < 1 || level > 6) {
-            console.warn('Invalid heading level, defaulting to 2:', level);
-            level = 2; // デフォルトはh2
+            level = 2;
           }
-
-          // テキストが文字列でない場合を処理
           let headingText;
-
           if (text === null || text === undefined) {
             headingText = 'Untitled Heading';
           } else if (typeof text === 'object') {
-            // オブジェクトの場合、有用な文字列表現を試みる
-            console.log('Base heading text is an object:', text);
-            if (text.text) {
-              headingText = String(text.text);
-            } else if (text.toString && typeof text.toString === 'function' && text.toString() !== '[object Object]') {
-              headingText = text.toString();
-            } else if (raw) {
-              headingText = String(raw);
-            } else {
-              headingText = 'Heading ' + level;
-            }
+            if (text.text) { headingText = String(text.text); }
+            else if (text.toString && typeof text.toString === 'function' && text.toString() !== '[object Object]') { headingText = text.toString(); }
+            else if (raw) { headingText = String(raw); }
+            else { headingText = 'Heading ' + level; }
           } else {
             headingText = String(text);
           }
-
-          // 一般的なIDを生成（アプリ名なし）
-          const id = `heading-${headingText.toLowerCase().replace(/[^\w]+/g, '-')}`;
-
-          // 既存のCSSクラスを活用し、インラインスタイルは使用しない
+          const id = `generic-heading-${headingText.toLowerCase().replace(/[^\\w]+/g, '-')}`;
           return `<h${level} id="${id}" class="md-heading md-h${level}">${headingText}</h${level}>`;
         } catch (error) {
-          console.error('Error in base heading renderer:', error);
+          console.error('Error in global heading renderer:', error);
           return `<h2>Error rendering heading</h2>`;
         }
       };
 
-      // タブ切り替え時の処理を追加
-      const tabElements = document.querySelectorAll('[data-bs-toggle="tab"]');
-      tabElements.forEach(tab => {
-        tab.addEventListener('shown.bs.tab', function (event) {
-          const appName = event.target.id.replace('-tab', '');
-          updateToc(appName);
-        });
-      });
+      // Global variable to store polling interval IDs
+      const pollingIntervals = {};
 
-      // ここに見出しIDのカウンターを追加
-      const headingCounters = {};
+      // ----- NEW: Polling Functions -----
+      async function checkMarkdownStatus(appName) {
+        console.log(`Checking status for ${appName}...`);
+        const currentDate = document.getElementById('date').value;
+        const contentDiv = document.getElementById(`content-${appName}`);
+        const alertElement = document.getElementById(`alert-${appName}`);
 
-      // 各タブのraw Markdownを変換して表示
-      {% for app in app_names %}
-      (function() {
-        const appName = "{{ app }}"; // appをJavaScriptの変数として明示的に定義
-        const rawMd = document.getElementById("raw-{{ app }}").value;
-        const contentDiv = document.getElementById(`content-{{ app }}`);
+        try {
+          const response = await fetch(`/api/markdown/${appName}?date=${currentDate}`);
 
-        // トピックごとに分割してから、各トピックをMarkdownとしてパース
-        const topics = rawMd.split('\n---\n');
+          if (response.ok) { // Status 200 OK
+            console.log(`Markdown found for ${appName}. Rendering...`);
+            const data = await response.json();
 
-        // このアプリ用のカスタムレンダラーを作成
-        const appRenderer = new marked.Renderer();
+            // --- FIX: Update the hidden textarea with the new markdown ---
+            const rawMdElement = document.getElementById(`raw-${appName}`);
+            if (rawMdElement) {
+                rawMdElement.value = data.markdown;
+            }
+            // --- END FIX ---
 
-        // アプリごとに見出しカウンターをリセット
+            renderMarkdownContent(appName, data.markdown); // Render the fetched markdown
+            updateToc(appName); // Update the Table of Contents
+            if (alertElement) {
+              alertElement.remove(); // Remove the 'not found' alert
+            }
+            showToast(`Content for ${appName} updated successfully.`);
+            stopPolling(appName); // Stop polling on success
+          } else if (response.status === 404) {
+            console.log(`Markdown for ${appName} not found yet. Continuing polling.`);
+            // Content not ready, continue polling
+          } else {
+            // Other errors (5xx, etc.)
+            const errorText = await response.text();
+            console.error(`Error checking status for ${appName} (${response.status}): ${errorText}`);
+            showToast(`Error checking status for ${appName}: ${response.status}. Stopping checks.`);
+            stopPolling(appName); // Stop polling on error
+          }
+        } catch (error) {
+          console.error(`Network error checking status for ${appName}:`, error);
+          showToast(`Network error checking status for ${appName}. Stopping checks.`);
+          stopPolling(appName); // Stop polling on network error
+        }
+      }
+
+      function startPolling(appName) {
+        if (pollingIntervals[appName]) {
+          console.log(`Polling already active for ${appName}.`);
+          return; // Avoid multiple intervals for the same app
+        }
+        console.log(`Starting polling for ${appName}...`);
+        // Check immediately first
+        checkMarkdownStatus(appName);
+        // Then check every 10 seconds
+        pollingIntervals[appName] = setInterval(() => checkMarkdownStatus(appName), 10000); // 10 seconds
+      }
+
+      function stopPolling(appName) {
+        if (pollingIntervals[appName]) {
+          console.log(`Stopping polling for ${appName}.`);
+          clearInterval(pollingIntervals[appName]);
+          delete pollingIntervals[appName];
+        }
+      }
+      // ----- END: Polling Functions -----
+
+      // ----- MOVED: Refactored Markdown Rendering Logic (Defined BEFORE retryJob) -----
+      function renderMarkdownContent(appName, markdownContent) {
+        const contentDiv = document.getElementById(`content-${appName}`);
+        if (!contentDiv) return; // Exit if content div not found
+
+        // Reset heading counter for this app
         headingCounters[appName] = {};
 
-        // 画像のレンダリング処理をコピー
-        appRenderer.image = renderer.image;
+        // Create a specific renderer instance for this rendering pass
+        const appRenderer = new marked.Renderer();
+        appRenderer.image = renderer.image; // Use global image renderer
+        appRenderer.link = renderer.link;   // Use global link renderer
 
-        // リンクのレンダリング処理をコピー
-        appRenderer.link = renderer.link;
-
-        // ヘッダー処理を拡張して、heading IDを追加
+        // Heading renderer (copied from initial load, using appName correctly)
         appRenderer.heading = function(text, level, raw) {
           try {
-            // デバッグ情報
-            console.log(`App renderer heading for ${appName}: text=${text}, level=${level}, raw=${raw}`);
-
-            // levelが未定義または1-6の範囲外の場合、デフォルト値を設定
             if (level === undefined || level === null || isNaN(level) || level < 1 || level > 6) {
-              console.warn(`Invalid heading level for ${appName}, defaulting to 2:`, level);
-              level = 2; // デフォルトはh2
+              level = 2;
             }
-
-            // テキストが文字列でない場合を処理
             let headingText;
-
             if (text === null || text === undefined) {
               headingText = 'Untitled Heading';
             } else if (typeof text === 'object') {
-              // オブジェクトの場合、有用な文字列表現を試みる
-              console.log(`App heading text is an object for ${appName}:`, text);
-              if (text.text) {
-                headingText = String(text.text);
-              } else if (text.toString && typeof text.toString === 'function' && text.toString() !== '[object Object]') {
-                headingText = text.toString();
-              } else if (raw) {
-                headingText = String(raw);
-              } else {
-                headingText = 'Heading ' + level;
-              }
+              if (text.text) { headingText = String(text.text); }
+              else if (text.toString && typeof text.toString === 'function' && text.toString() !== '[object Object]') { headingText = text.toString(); }
+              else if (raw) { headingText = String(raw); }
+              else { headingText = 'Heading ' + level; }
             } else {
               headingText = String(text);
             }
-
-            // 見出しテキスト用のセーフなキーを生成
             const headingKey = headingText.toLowerCase().replace(/[^\w]+/g, '-');
-
-            // 同じテキストの見出しにカウンターを使用して一意のIDを生成
             if (!headingCounters[appName][headingKey]) {
               headingCounters[appName][headingKey] = 1;
             } else {
               headingCounters[appName][headingKey]++;
             }
-
-            // カウンターを使用して一意のIDを生成
             const count = headingCounters[appName][headingKey];
             const id = `heading-${appName}-${headingKey}${count > 1 ? '-' + count : ''}`;
             return `<h${level} id="${id}" class="md-heading md-h${level}">${headingText}</h${level}>`;
@@ -938,7 +967,6 @@
           }
         };
 
-        // このアプリ用の設定でmarkedを実行
         const markedOptions = {
           renderer: appRenderer,
           gfm: true,
@@ -947,51 +975,25 @@
           smartLists: true,
           smartypants: false,
           mangle: false,
-          headerIds: true,
-          // 改善: ワルキリオプションを追加してより厳密なパースを行う
-          walkTokens: function(token) {
-            if (token.type === 'heading') {
-              console.log('Token heading:', token);
-            }
-          }
+          headerIds: true
         };
 
+        // Process potentially multiple topics separated by hr
+        const topics = markdownContent.split('\n---\n');
         contentDiv.innerHTML = topics.map((topicMd, index) => {
-          const topicId = `${appName}-${index}`;
-
-          // デバッグ情報を出力
-          console.log(`Parsing topic for ${appName}-${index}:`, topicMd.substring(0, 100) + '...');
-
-          // マークダウンをパースする前にNullチェック
+          const topicId = `${appName}-${index}`; // Unique ID for chat within topic
           if (!topicMd || typeof topicMd !== 'string') {
             console.error(`Invalid markdown for topic ${topicId}:`, topicMd);
             return `<div class="topic"><p>Error parsing content</p></div>`;
           }
-
           try {
-            // 前処理：見出し行を正規化
-            const preprocessedMd = topicMd.split('\n').map(line => {
-              // 各行が文字列であることを確認
-              const lineStr = typeof line === 'string' ? line : String(line || '');
-              // 見出し行のパターンを確認（例：# タイトル）
-              if (lineStr.trim().match(/^#+\s+/)) {
-                console.log('Preprocessing heading line:', lineStr);
-                // 見出し行として正規化
-                return lineStr;
-              }
-              return lineStr;
-            }).join('\n');
-
-            console.log(`Preprocessed markdown for ${topicId}:`, preprocessedMd.substring(0, 100) + '...');
-
-            const parsedTopic = marked.parse(preprocessedMd, markedOptions);
-
-            // パース結果が文字列であることを確認
+            const parsedTopic = marked.parse(topicMd, markedOptions);
+            // Ensure parse result is string
             if (typeof parsedTopic !== 'string') {
               console.error(`Parse result is not a string for topic ${topicId}:`, parsedTopic);
               return `<div class="topic"><p>Error: Unexpected parse result</p></div>`;
             }
-
+            // Return topic HTML including the chat interface structure
             return `
               <div class="topic">
                 ${parsedTopic}
@@ -1011,56 +1013,192 @@
             console.error(`Error parsing markdown for topic ${topicId}:`, error);
             return `<div class="topic"><p>Error parsing content: ${error.message}</p></div>`;
           }
-        }).join('<hr>');
+        }).join('<hr>'); // Join topics with <hr>
 
-        // パース後のリンクに target="_blank" を追加
+        // Add target=_blank to links after rendering
         contentDiv.querySelectorAll('a').forEach(link => {
           if (link.href && !link.href.startsWith('javascript:')) {
             link.setAttribute('target', '_blank');
             link.setAttribute('rel', 'noopener noreferrer');
           }
         });
+
+        // Re-render KaTeX equations in the updated content
+        if (typeof renderMathInElement === 'function') {
+          renderMathInElement(contentDiv, {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '$', right: '$', display: false },
+              { left: '\\(', right: '\\)', display: false },
+              { left: '\\[', right: '\\]', display: true }
+            ]
+          });
+        }
+      }
+
+      // ----- MODIFIED: retryJob Function -----
+      async function retryJob(appName, event) {
+        console.log(`Triggering job for ${appName}...`);
+        const button = event.target.closest('.retry-button');
+        if (!button) return;
+
+        button.disabled = true;
+        const originalButtonText = button.innerHTML; // Store original button content
+        button.innerHTML = `
+          <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+          Triggering...
+        `;
+
+        // Show initial toast immediately
+        showToast(`Job trigger sent for ${appName}. Checking for updates...`);
+
+        try {
+          // Call the retry endpoint, but DON'T wait for the response here.
+          // We initiate polling regardless of the trigger outcome.
+          fetch(`/retry/${appName}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }).then(response => {
+             // Log the trigger response status, but don't block polling
+             console.log(`Trigger request for ${appName} completed with status: ${response.status}`);
+             // Handle specific non-OK statuses if needed for logging/debugging
+             if (!response.ok && response.status !== 504) { // 504 Gateway Timeout is expected sometimes
+                 response.text().then(text => {
+                     console.warn(`Trigger request for ${appName} failed or timed out: ${response.status}`, text);
+                 });
+             }
+          }).catch(error => {
+             // Log network errors during the trigger attempt
+             console.error(`Network error during trigger request for ${appName}:`, error);
+             // Still proceed with polling
+          });
+
+          // Start polling immediately after *sending* the request
+          startPolling(appName);
+
+        } catch (error) {
+          // Catch synchronous errors during the fetch setup (unlikely)
+          console.error('Error setting up trigger request:', error);
+          showToast(`Error initiating trigger for ${appName}: ${error.message}`);
+          // Optionally stop polling if the trigger setup fails catastrophically
+          // stopPolling(appName);
+        } finally {
+          // Reset the button text after a short delay to show "Triggering..." briefly
+          setTimeout(() => {
+              // Check if still polling before resetting text, or just reset
+               button.innerHTML = originalButtonText;
+               button.disabled = false;
+          }, 1000); // Reset after 1 second
+        }
+      }
+      // ----- END: retryJob Function -----
+
+      // ----- MODIFIED: Initial Content Rendering -----
+      // Initial rendering loop uses the new function
+      {% for app in app_names %}
+      (function() {
+        const appName = "{{ app }}";
+        const rawMdElement = document.getElementById(`raw-${appName}`);
+        if (rawMdElement) {
+          const rawMd = rawMdElement.value;
+          renderMarkdownContent(appName, rawMd);
+        }
       })();
       {% endfor %}
 
-      // 初期表示時の目次を更新
+      // Initialize TOC after initial rendering
       updateToc('{{ app_names[0] }}');
 
-      // ページ全体のKaTeX数式レンダリング
-      renderMathInElement(document.body, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '$', right: '$', display: false },
-          { left: '\\(', right: '\\)', display: false },
-          { left: '\\[', right: '\\]', display: true }
-        ]
-      });
-
-      // 時計と天気の初期化
+      // Update clock and weather initially
       updateClock();
-      setInterval(updateClock, 60000); // 1分ごとに更新
+      setInterval(updateClock, 60000); // Update clock every minute
       updateWeather();
-      setInterval(updateWeather, 600000); // 10分ごとに更新
+      setInterval(updateWeather, 600000); // Update weather every 10 minutes
 
-      // ページ読み込み時に初回のスクロール位置に基づく目次ハイライトを実行
+      // Initial TOC highlight based on scroll position or hash
       setTimeout(() => {
         const activeTabEl = document.querySelector('.tab-pane.active');
         if (activeTabEl) {
-          highlightActiveTocItem(activeTabEl.id);
+          if (window.location.hash) {
+            const targetId = window.location.hash.substring(1);
+            const targetElement = document.getElementById(targetId);
+            if (targetElement) {
+              highlightActiveTocItem(activeTabEl.id); // Highlight based on hash first
+              scrollTocToLink(document.querySelector(`.toc-link[href=\"#${targetId}\"]`));
+            } else {
+              highlightActiveTocItem(activeTabEl.id); // Fallback to scroll position
+            }
+          } else {
+            highlightActiveTocItem(activeTabEl.id); // Highlight based on scroll position
+          }
         }
-      }, 500); // DOMが完全に構築されるのを待つため少し遅延
+      }, 500); // Delay to allow rendering
 
-      // スクロール処理の最適化のためのスロットル関数
+      // Scroll listener setup (using throttle)
+      window.addEventListener('scroll', throttle(function() {
+        if (window.isScrollingProgrammatically) return;
+        const activeTabEl = document.querySelector('.tab-pane.active');
+        if (!activeTabEl) return;
+        highlightActiveTocItem(activeTabEl.id);
+      }, 50));
+
+      // Global click listener for TOC links
+      document.addEventListener('click', function(e) {
+        if (e.target && e.target.classList.contains('toc-link')) {
+          e.preventDefault();
+          window.isScrollingProgrammatically = true;
+          document.querySelectorAll('.toc-link').forEach(l => l.classList.remove('active', 'highlight-pulse'));
+          e.target.classList.add('active');
+          const targetId = e.target.getAttribute('href').substring(1);
+          const targetElement = document.getElementById(targetId);
+          if (targetElement) {
+            targetElement.scrollIntoView({ behavior: 'smooth' });
+            history.pushState(null, null, `#${targetId}`);
+            // Add pulse animation
+            e.target.classList.add('highlight-pulse');
+            setTimeout(() => e.target.classList.remove('highlight-pulse'), 1000);
+          }
+          setTimeout(() => { window.isScrollingProgrammatically = false; }, 1000); // Reset flag after scroll likely finishes
+        }
+      });
+
+      // Tab change listener to update TOC
+      const tabElements = document.querySelectorAll('[data-bs-toggle=\"tab\"]');
+      tabElements.forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function (event) {
+          const appName = event.target.id.replace('-tab', '');
+          updateToc(appName); // Update TOC when tab changes
+          // Highlight TOC based on scroll position *after* tab change animation
+          setTimeout(() => highlightActiveTocItem(appName), 150);
+        });
+      });
+
+      // ----- Helper Functions (Clock, Weather, TOC, etc.) -----
+      // Note: Make sure all helper function definitions (updateClock, updateWeather,
+      // updateToc, highlightActiveTocItem, scrollTocToLink, throttle, etc.)
+      // are defined *before* they are called in the initial setup section above.
+
+      // Add event listeners for retry buttons AFTER defining retryJob
+      document.querySelectorAll('.retry-button').forEach(button => {
+        button.addEventListener('click', function(event) {
+          const appName = this.getAttribute('data-app-name');
+          if (appName) {
+            retryJob(appName, event); // Call retryJob directly
+          } else {
+            console.error('Could not find app name for retry button:', this);
+          }
+        });
+      });
+
+      // Example: Throttle function (should be defined early)
       function throttle(func, delay) {
-        // funcがfunctionでない場合のエラーハンドリング
         if (typeof func !== 'function') {
           console.error('Invalid function passed to throttle');
           return function() {};
         }
-
-        // delayのデフォルト値設定
         const safeDelay = typeof delay === 'number' && delay > 0 ? delay : 100;
-
         let lastCall = 0;
         return function(...args) {
           try {
@@ -1076,70 +1214,350 @@
         };
       }
 
-      // プログラムによるスクロールかどうかを追跡するフラグ
-      window.isScrollingProgrammatically = false;
+      // Placeholder for other helper functions - ensure they are defined above initial calls
+      function updateClock() {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        document.getElementById('clock').textContent = `${hours}:${minutes}`;
+        console.log('Clock updated:', `${hours}:${minutes}`);
+      }
+      async function updateWeather() {
+        try {
+          // バックエンドAPIから天気データを取得
+          const response = await fetch('/api/weather');
+          const data = await response.json();
 
-      // スクロールイベントのリスナーを設定
-      window.addEventListener('scroll', throttle(function() {
-        // プログラムによるスクロール中は処理をスキップ
-        if (window.isScrollingProgrammatically) return;
+          // 気温と天気アイコンを表示
+          document.getElementById('weather').textContent = `${data.temp}°C ${data.weather_icon}`;
+          console.log('Weather updated:', `${data.temp}°C ${data.weather_icon}`);
+        } catch (error) {
+          console.error('Weather update failed:', error);
+          // エラー時は何もしない（初期表示のままにする）
+        }
+      }
+      function updateToc(appName) {
+        // appNameが有効か確認
+        if (!appName) {
+          console.error('Invalid appName in updateToc');
+          return;
+        }
 
-        const activeTabEl = document.querySelector('.tab-pane.active');
-        if (!activeTabEl) return; // アクティブなタブが見つからない場合は処理を中止
+        const rawMdElement = document.getElementById(`raw-${appName}`);
+        if (!rawMdElement) {
+          console.error(`Element with id 'raw-${appName}' not found`);
+          return;
+        }
 
-        const activeApp = activeTabEl.id;
-        highlightActiveTocItem(activeApp);
-      }, 50)); // スロットル時間を短くして応答性を向上
+        const rawMd = rawMdElement.value || '';
+        const headings = extractHeadings(rawMd);
+        const tocList = document.getElementById('toc-list');
 
-      // 目次リンクのクリックイベントをグローバルに処理
-      document.addEventListener('click', function(e) {
-        if (e.target && e.target.classList.contains('toc-link')) {
-          e.preventDefault();
+        if (!tocList) {
+          console.error('Toc list element not found');
+          return;
+        }
 
-          // すべてのリンクからactiveクラスを削除
-          document.querySelectorAll('.toc-link').forEach(l => l.classList.remove('active', 'highlight-pulse'));
+        tocList.innerHTML = '';
 
-          // クリックされたリンクにactiveクラスを追加
-          e.target.classList.add('active');
-          e.target.classList.add('highlight-pulse');
+        // 見出しIDのカウンターを初期化（見出しレンダリング時と同じロジックを使用）
+        const headingCounters = {};
 
-          // アニメーション後にハイライトクラスを削除
-          setTimeout(() => {
-            e.target.classList.remove('highlight-pulse');
-          }, 1000);
+        headings.forEach((heading, index) => {
+          const li = document.createElement('li');
+          li.className = 'toc-item';
+          const link = document.createElement('a');
+          link.className = 'toc-link';
 
-          // リンクのターゲットを取得
-          const targetId = e.target.getAttribute('href').substring(1);
+          // 見出しのテキストとレベルを抽出
+          let headingText, level;
+
+          try {
+            // headingがオブジェクトの場合を考慮
+            if (typeof heading === 'object' && heading !== null) {
+              // オブジェクトからテキストを抽出する試み
+              if (heading.text) {
+                headingText = String(heading.text);
+              } else if (heading.toString && typeof heading.toString === 'function') {
+                headingText = heading.toString();
+              } else {
+                headingText = 'Unnamed Heading';
+              }
+              // レベルの抽出
+              level = heading.level || 1;
+            } else {
+              // 通常のマークダウン形式の見出し
+              const headingString = String(heading || '');
+              const headingMatch = headingString.match(/^(#+)\s+(.+)$/);
+              level = headingMatch ? headingMatch[1].length : 1; // #の数でレベルを判定
+              headingText = headingString.replace(/^#+\s+/, '');
+            }
+          } catch (error) {
+            console.error('Error processing heading:', error);
+            headingText = 'Error in heading';
+            level = 1;
+          }
+
+          // textが文字列でない場合の対応
+          const safeHeadingText = typeof headingText === 'string' ? headingText : String(headingText || '');
+
+          // 見出しキーを生成（マークダウンパース時と同じロジック）
+          const headingKey = safeHeadingText.toLowerCase().replace(/[^\w]+/g, '-');
+
+          // 同じテキストの見出しにカウンターを使用
+          if (!headingCounters[headingKey]) {
+            headingCounters[headingKey] = 1;
+          } else {
+            headingCounters[headingKey]++;
+          }
+
+          // カウンターを使用して一意のIDを生成（レンダリング時と同じロジック）
+          const count = headingCounters[headingKey];
+          const headingId = `heading-${appName}-${headingKey}${count > 1 ? '-' + count : ''}`;
+
+          // レベルに応じてインデントを設定（ベースとなるパディング + レベルに応じた追加パディング）
+          const indent = (level - 1) * 8; // より小さいインデント幅に調整
+          link.style.paddingLeft = `${indent + 8}px`;
+
+          // 長い見出しを省略表示
+          if (safeHeadingText.length > 40) {
+            link.title = safeHeadingText; // ホバー時にフルテキスト表示
+            link.textContent = safeHeadingText.substring(0, 38) + '...';
+          } else {
+            link.textContent = safeHeadingText;
+          }
+
+          link.href = `#${headingId}`;
+          link.dataset.level = level;
+
+          // クリックイベントは親のイベントリスナーで処理
+
+          li.appendChild(link);
+          tocList.appendChild(li);
+        });
+
+        // ページロード時にURLハッシュがある場合、該当する見出しへスクロール
+        if (window.location.hash) {
+          const targetId = window.location.hash.substring(1);
           const targetElement = document.getElementById(targetId);
-
           if (targetElement) {
-            // プログラムによるスクロールフラグを設定
-            window.isScrollingProgrammatically = true;
-
-            // スムーズスクロール
-            targetElement.scrollIntoView({ behavior: 'smooth' });
-
-            // URLのハッシュを更新
-            history.pushState(null, null, `#${targetId}`);
-
-            // スクロールが完了したらフラグをリセット
             setTimeout(() => {
-              window.isScrollingProgrammatically = false;
-            }, 1000);
+              // プログラムによるスクロールフラグを設定
+              window.isScrollingProgrammatically = true;
+
+              targetElement.scrollIntoView({ behavior: 'smooth' });
+
+              // 対応する目次リンクをアクティブに
+              const tocLink = document.querySelector(`.toc-link[href="#${targetId}"]`);
+              if (tocLink) {
+                // すべてのアクティブクラスを削除
+                document.querySelectorAll('.toc-link').forEach(l => l.classList.remove('active', 'highlight-pulse'));
+
+                // 新しいリンクにアクティブクラスを追加
+                tocLink.classList.add('active');
+              }
+
+              // スクロールフラグをリセット
+              setTimeout(() => {
+                window.isScrollingProgrammatically = false;
+              }, 1000);
+            }, 300); // 少し遅延させてDOM構築を待つ
           }
         }
-      });
+
+        // 初期ロード時にアクティブな項目がない場合、最初の見出しをアクティブにする
+        setTimeout(() => {
+          if (!document.querySelector('.toc-link.active') && tocList.children.length > 0) {
+            const firstLink = tocList.querySelector('.toc-link');
+            if (firstLink) {
+              firstLink.classList.add('active');
+            }
+          }
+        }, 500);
+      }
+      function highlightActiveTocItem(appName) {
+        // appNameのバリデーション強化
+        if (!appName || typeof appName !== 'string') {
+          console.warn('Invalid appName in highlightActiveTocItem:', appName);
+          return;
+        }
+
+        try {
+          // 現在のアプリの見出し要素をすべて取得
+          const headings = Array.from(
+            document.querySelectorAll(`#${appName} h1[id^="heading-"], #${appName} h2[id^="heading-"], #${appName} h3[id^="heading-"], #${appName} h4[id^="heading-"], #${appName} h5[id^="heading-"], #${appName} h6[id^="heading-"]`)
+          );
+
+          if (headings.length === 0) return;
+
+          // ナビゲーションバーの高さを考慮した余白
+          const navbarHeight = 72;
+          // スクロール位置に余裕を持たせる
+          const scrollPosition = window.scrollY + navbarHeight + 30; // 余白を調整
+
+          // 現在のスクロール位置に最も近い見出しを探す
+          let currentHeading = null;
+          let closestDistance = Number.MAX_SAFE_INTEGER;
+
+          // まず、スクロール位置以下にある最も近い見出しを探す
+          for (let i = 0; i < headings.length; i++) {
+            const heading = headings[i];
+            const headingTop = heading.getBoundingClientRect().top + window.scrollY;
+
+            // スクロール位置との距離を計算
+            if (headingTop <= scrollPosition) {
+              const distance = scrollPosition - headingTop;
+              if (distance < closestDistance) {
+                closestDistance = distance;
+                currentHeading = heading;
+              }
+            }
+          }
+
+          // 該当する見出しがない場合は、スクロール位置に最も近い見出しを選択
+          if (!currentHeading && headings.length > 0) {
+            let minDistance = Number.MAX_SAFE_INTEGER;
+            for (const heading of headings) {
+              const headingTop = heading.getBoundingClientRect().top + window.scrollY;
+              const distance = Math.abs(headingTop - scrollPosition);
+              if (distance < minDistance) {
+                minDistance = distance;
+                currentHeading = heading;
+              }
+            }
+          }
+
+          if (currentHeading) {
+            const headingId = currentHeading.id;
+
+            // headingIdが有効か確認
+            if (!headingId) {
+              console.warn('Invalid heading ID in highlightActiveTocItem');
+              return;
+            }
+
+            // すべての目次リンクを取得
+            const tocLinks = document.querySelectorAll('.toc-link');
+            const previousActiveLink = document.querySelector('.toc-link.active');
+
+            // 現在の見出しに対応する目次リンクを探す（完全一致で検索）
+            const newActiveLink = document.querySelector(`.toc-link[href="#${headingId}"]`);
+
+            // 同じリンクが既にアクティブな場合は何もしない
+            if (previousActiveLink === newActiveLink) return;
+
+            // すべてのアクティブクラスを削除
+            tocLinks.forEach(link => link.classList.remove('active', 'highlight-pulse'));
+
+            // 現在のヘッディングに対応するリンクを探してアクティブにする
+            if (newActiveLink) {
+              // アニメーション効果のためにクラスを追加
+              newActiveLink.classList.add('active');
+              newActiveLink.classList.add('highlight-pulse');
+
+              // アニメーション後にハイライトクラスを削除
+              setTimeout(() => {
+                newActiveLink.classList.remove('highlight-pulse');
+              }, 1000);
+            } else {
+              // 対応するリンクが見つからない場合（通常は起こらないはず）、デバッグログを出力
+              console.warn(`TOC link not found for heading ID: ${headingId}`);
+            }
+          }
+        } catch (error) {
+          console.error('Error in highlightActiveTocItem:', error);
+        }
+      }
+      function scrollTocToLink(linkElement) {
+        if (!linkElement) {
+          console.warn('Invalid link element in scrollTocToLink');
+          return;
+        }
+
+        const tocList = document.getElementById('toc-list');
+        if (!tocList) {
+          console.warn('Toc list element not found in scrollTocToLink');
+          return;
+        }
+
+        try {
+          // リンク要素の位置を取得
+          const linkTop = linkElement.offsetTop;
+          const linkHeight = linkElement.offsetHeight;
+          const tocHeight = tocList.clientHeight;
+
+          // 常に目次をスクロールして、アクティブな項目が中央に来るようにする
+          // カーソルを中央に配置
+          const targetPosition = Math.max(0, linkTop - (tocHeight / 2) + (linkHeight / 2));
+
+          // スムーズスクロール
+          tocList.scrollTo({
+            top: targetPosition,
+            behavior: 'smooth'
+          });
+
+          console.log(`Scrolling TOC to link: ${linkElement.textContent}, position: ${targetPosition}`);
+        } catch (error) {
+          console.error('Error in scrollTocToLink:', error);
+        }
+      }
+      function extractHeadings(markdown) {
+        // markdownがnullやundefinedの場合、または文字列でない場合は空配列を返す
+        const mdString = String(markdown || '');
+
+        // コードブロックを考慮して見出しを抽出
+        const lines = mdString.split('\n');
+        const headings = [];
+        let insideCodeBlock = false;
+
+        for (let i = 0; i < lines.length; i++) {
+          // 各行を文字列として確実に扱う
+          const lineObj = lines[i];
+          const line = typeof lineObj === 'string' ? lineObj.trim() : String(lineObj || '');
+
+          // デバッグ情報：最初の数行の型情報を出力
+          if (i < 5) {
+            console.log(`Line ${i} type:`, typeof lineObj, 'Value:', line.substring(0, 50));
+          }
+
+          // コードブロックの開始/終了をチェック
+          if (line.match(/^```/)) {
+            insideCodeBlock = !insideCodeBlock;
+            continue;
+          }
+
+          // コードブロックの外にある場合のみ見出しとして処理
+          if (!insideCodeBlock && line.match(/^#+\s+.+/)) {
+            console.log('Found heading:', line);
+
+            // 見出しの詳細情報をオブジェクトとして保存
+            const headingMatch = line.match(/^(#+)\s+(.+)$/);
+            if (headingMatch) {
+              const level = headingMatch[1].length;
+              const text = headingMatch[2];
+              headings.push({
+                level: level,
+                text: text,
+                raw: line
+              });
+            } else {
+              headings.push(line); // フォールバック
+            }
+          }
+        }
+
+        console.log('Extracted headings:', headings);
+        return headings;
+      }
     });
 
-    // キーボードショートカット用の関数
+    // Make chat functions globally accessible if needed, or attach to window
     window.handleKeyPress = function(event, topicId) {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         sendMessage(topicId);
       }
     };
-
-    // チャットメッセージを送信する関数
     window.sendMessage = async function(topicId) {
       const input = document.getElementById(`input-${topicId}`);
       const messages = document.getElementById(`messages-${topicId}`);
@@ -1227,365 +1645,15 @@
       }
     };
 
-    // 天気コードと天気アイコンの対応
-    const weatherIcons = {
-      '100': '☀️',  // 晴れ
-      '101': '🌤️',  // 晴れ時々くもり
-      '200': '☁️',  // くもり
-      '201': '⛅',  // くもり時々晴れ
-      '202': '🌧️',  // くもり一時雨
-      '300': '🌧️',  // 雨
-      '301': '🌦️',  // 雨時々晴れ
-      '400': '🌨️',  // 雪
-    };
-
-    // 天気の取得と更新
-    async function updateWeather() {
-      try {
-        // バックエンドAPIから天気データを取得
-        const response = await fetch('/api/weather');
-        const data = await response.json();
-
-        // 気温と天気アイコンを表示
-        document.getElementById('weather').textContent = `${data.temp}°C ${data.weather_icon}`;
-        console.log('Weather updated:', `${data.temp}°C ${data.weather_icon}`);
-      } catch (error) {
-        console.error('Weather update failed:', error);
-        // エラー時は何もしない（初期表示のままにする）
+    // Function to show toast notifications
+    function showToast(message) {
+      const toastLiveExample = document.getElementById('liveToast');
+      const toastBody = toastLiveExample.querySelector('.toast-body');
+      if (toastBody) {
+        toastBody.textContent = message;
+        const toast = new bootstrap.Toast(toastLiveExample);
+        toast.show();
       }
-    }
-
-    // 時計の更新
-    function updateClock() {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      document.getElementById('clock').textContent = `${hours}:${minutes}`;
-      console.log('Clock updated:', `${hours}:${minutes}`);
-    }
-
-    // スクロール位置に基づいて目次アイテムをハイライトする関数
-    function highlightActiveTocItem(appName) {
-      // appNameのバリデーション強化
-      if (!appName || typeof appName !== 'string') {
-        console.warn('Invalid appName in highlightActiveTocItem:', appName);
-        return;
-      }
-
-      try {
-        // 現在のアプリの見出し要素をすべて取得
-        const headings = Array.from(
-          document.querySelectorAll(`#${appName} h1[id^="heading-"], #${appName} h2[id^="heading-"], #${appName} h3[id^="heading-"], #${appName} h4[id^="heading-"], #${appName} h5[id^="heading-"], #${appName} h6[id^="heading-"]`)
-        );
-
-        if (headings.length === 0) return;
-
-        // ナビゲーションバーの高さを考慮した余白
-        const navbarHeight = 72;
-        // スクロール位置に余裕を持たせる
-        const scrollPosition = window.scrollY + navbarHeight + 30; // 余白を調整
-
-        // 現在のスクロール位置に最も近い見出しを探す
-        let currentHeading = null;
-        let closestDistance = Number.MAX_SAFE_INTEGER;
-
-        // まず、スクロール位置以下にある最も近い見出しを探す
-        for (let i = 0; i < headings.length; i++) {
-          const heading = headings[i];
-          const headingTop = heading.getBoundingClientRect().top + window.scrollY;
-
-          // スクロール位置との距離を計算
-          if (headingTop <= scrollPosition) {
-            const distance = scrollPosition - headingTop;
-            if (distance < closestDistance) {
-              closestDistance = distance;
-              currentHeading = heading;
-            }
-          }
-        }
-
-        // 該当する見出しがない場合は、スクロール位置に最も近い見出しを選択
-        if (!currentHeading && headings.length > 0) {
-          let minDistance = Number.MAX_SAFE_INTEGER;
-          for (const heading of headings) {
-            const headingTop = heading.getBoundingClientRect().top + window.scrollY;
-            const distance = Math.abs(headingTop - scrollPosition);
-            if (distance < minDistance) {
-              minDistance = distance;
-              currentHeading = heading;
-            }
-          }
-        }
-
-        if (currentHeading) {
-          const headingId = currentHeading.id;
-
-          // headingIdが有効か確認
-          if (!headingId) {
-            console.warn('Invalid heading ID in highlightActiveTocItem');
-            return;
-          }
-
-          // すべての目次リンクを取得
-          const tocLinks = document.querySelectorAll('.toc-link');
-          const previousActiveLink = document.querySelector('.toc-link.active');
-
-          // 現在の見出しに対応する目次リンクを探す（完全一致で検索）
-          const newActiveLink = document.querySelector(`.toc-link[href="#${headingId}"]`);
-
-          // 同じリンクが既にアクティブな場合は何もしない
-          if (previousActiveLink === newActiveLink) return;
-
-          // すべてのアクティブクラスを削除
-          tocLinks.forEach(link => link.classList.remove('active', 'highlight-pulse'));
-
-          // 現在のヘッディングに対応するリンクを探してアクティブにする
-          if (newActiveLink) {
-            // アニメーション効果のためにクラスを追加
-            newActiveLink.classList.add('active');
-            newActiveLink.classList.add('highlight-pulse');
-
-            // アニメーション後にハイライトクラスを削除
-            setTimeout(() => {
-              newActiveLink.classList.remove('highlight-pulse');
-            }, 1000);
-          } else {
-            // 対応するリンクが見つからない場合（通常は起こらないはず）、デバッグログを出力
-            console.warn(`TOC link not found for heading ID: ${headingId}`);
-          }
-        }
-      } catch (error) {
-        console.error('Error in highlightActiveTocItem:', error);
-      }
-    }
-
-    // 目次内の特定のリンクへスクロールする関数
-    function scrollTocToLink(linkElement) {
-      if (!linkElement) {
-        console.warn('Invalid link element in scrollTocToLink');
-        return;
-      }
-
-      const tocList = document.getElementById('toc-list');
-      if (!tocList) {
-        console.warn('Toc list element not found in scrollTocToLink');
-        return;
-      }
-
-      try {
-        // リンク要素の位置を取得
-        const linkTop = linkElement.offsetTop;
-        const linkHeight = linkElement.offsetHeight;
-        const tocHeight = tocList.clientHeight;
-
-        // 常に目次をスクロールして、アクティブな項目が中央に来るようにする
-        // カーソルを中央に配置
-        const targetPosition = Math.max(0, linkTop - (tocHeight / 2) + (linkHeight / 2));
-
-        // スムーズスクロール
-        tocList.scrollTo({
-          top: targetPosition,
-          behavior: 'smooth'
-        });
-
-        console.log(`Scrolling TOC to link: ${linkElement.textContent}, position: ${targetPosition}`);
-      } catch (error) {
-        console.error('Error in scrollTocToLink:', error);
-      }
-    }
-
-    // 目次を更新する関数
-    function updateToc(appName) {
-      // appNameが有効か確認
-      if (!appName) {
-        console.error('Invalid appName in updateToc');
-        return;
-      }
-
-      const rawMdElement = document.getElementById(`raw-${appName}`);
-      if (!rawMdElement) {
-        console.error(`Element with id 'raw-${appName}' not found`);
-        return;
-      }
-
-      const rawMd = rawMdElement.value || '';
-      const headings = extractHeadings(rawMd);
-      const tocList = document.getElementById('toc-list');
-
-      if (!tocList) {
-        console.error('Toc list element not found');
-        return;
-      }
-
-      tocList.innerHTML = '';
-
-      // 見出しIDのカウンターを初期化（見出しレンダリング時と同じロジックを使用）
-      const headingCounters = {};
-
-      headings.forEach((heading, index) => {
-        const li = document.createElement('li');
-        li.className = 'toc-item';
-        const link = document.createElement('a');
-        link.className = 'toc-link';
-
-        // 見出しのテキストとレベルを抽出
-        let headingText, level;
-
-        try {
-          // headingがオブジェクトの場合を考慮
-          if (typeof heading === 'object' && heading !== null) {
-            // オブジェクトからテキストを抽出する試み
-            if (heading.text) {
-              headingText = String(heading.text);
-            } else if (heading.toString && typeof heading.toString === 'function') {
-              headingText = heading.toString();
-            } else {
-              headingText = 'Unnamed Heading';
-            }
-            // レベルの抽出
-            level = heading.level || 1;
-          } else {
-            // 通常のマークダウン形式の見出し
-            const headingString = String(heading || '');
-            const headingMatch = headingString.match(/^(#+)\s+(.+)$/);
-            level = headingMatch ? headingMatch[1].length : 1; // #の数でレベルを判定
-            headingText = headingString.replace(/^#+\s+/, '');
-          }
-        } catch (error) {
-          console.error('Error processing heading:', error);
-          headingText = 'Error in heading';
-          level = 1;
-        }
-
-        // textが文字列でない場合の対応
-        const safeHeadingText = typeof headingText === 'string' ? headingText : String(headingText || '');
-
-        // 見出しキーを生成（マークダウンパース時と同じロジック）
-        const headingKey = safeHeadingText.toLowerCase().replace(/[^\w]+/g, '-');
-
-        // 同じテキストの見出しにカウンターを使用
-        if (!headingCounters[headingKey]) {
-          headingCounters[headingKey] = 1;
-        } else {
-          headingCounters[headingKey]++;
-        }
-
-        // カウンターを使用して一意のIDを生成（レンダリング時と同じロジック）
-        const count = headingCounters[headingKey];
-        const headingId = `heading-${appName}-${headingKey}${count > 1 ? '-' + count : ''}`;
-
-        // レベルに応じてインデントを設定（ベースとなるパディング + レベルに応じた追加パディング）
-        const indent = (level - 1) * 8; // より小さいインデント幅に調整
-        link.style.paddingLeft = `${indent + 8}px`;
-
-        // 長い見出しを省略表示
-        if (safeHeadingText.length > 40) {
-          link.title = safeHeadingText; // ホバー時にフルテキスト表示
-          link.textContent = safeHeadingText.substring(0, 38) + '...';
-        } else {
-          link.textContent = safeHeadingText;
-        }
-
-        link.href = `#${headingId}`;
-        link.dataset.level = level;
-
-        // クリックイベントは親のイベントリスナーで処理
-
-        li.appendChild(link);
-        tocList.appendChild(li);
-      });
-
-      // ページロード時にURLハッシュがある場合、該当する見出しへスクロール
-      if (window.location.hash) {
-        const targetId = window.location.hash.substring(1);
-        const targetElement = document.getElementById(targetId);
-        if (targetElement) {
-          setTimeout(() => {
-            // プログラムによるスクロールフラグを設定
-            window.isScrollingProgrammatically = true;
-
-            targetElement.scrollIntoView({ behavior: 'smooth' });
-
-            // 対応する目次リンクをアクティブに
-            const tocLink = document.querySelector(`.toc-link[href="#${targetId}"]`);
-            if (tocLink) {
-              // すべてのアクティブクラスを削除
-              document.querySelectorAll('.toc-link').forEach(l => l.classList.remove('active', 'highlight-pulse'));
-
-              // 新しいリンクにアクティブクラスを追加
-              tocLink.classList.add('active');
-            }
-
-            // スクロールフラグをリセット
-            setTimeout(() => {
-              window.isScrollingProgrammatically = false;
-            }, 1000);
-          }, 300); // 少し遅延させてDOM構築を待つ
-        }
-      }
-
-      // 初期ロード時にアクティブな項目がない場合、最初の見出しをアクティブにする
-      setTimeout(() => {
-        if (!document.querySelector('.toc-link.active') && tocList.children.length > 0) {
-          const firstLink = tocList.querySelector('.toc-link');
-          if (firstLink) {
-            firstLink.classList.add('active');
-          }
-        }
-      }, 500);
-    }
-
-    // Markdownから見出しを抽出する関数
-    function extractHeadings(markdown) {
-      // markdownがnullやundefinedの場合、または文字列でない場合は空配列を返す
-      if (!markdown || typeof markdown !== 'string') {
-        console.warn('Invalid markdown in extractHeadings:', markdown);
-        return [];
-      }
-
-      // コードブロックを考慮して見出しを抽出
-      const lines = markdown.split('\n');
-      const headings = [];
-      let insideCodeBlock = false;
-
-      for (let i = 0; i < lines.length; i++) {
-        // 各行を文字列として確実に扱う
-        const lineObj = lines[i];
-        const line = typeof lineObj === 'string' ? lineObj.trim() : String(lineObj || '');
-
-        // デバッグ情報：最初の数行の型情報を出力
-        if (i < 5) {
-          console.log(`Line ${i} type:`, typeof lineObj, 'Value:', line.substring(0, 50));
-        }
-
-        // コードブロックの開始/終了をチェック
-        if (line.match(/^```/)) {
-          insideCodeBlock = !insideCodeBlock;
-          continue;
-        }
-
-        // コードブロックの外にある場合のみ見出しとして処理
-        if (!insideCodeBlock && line.match(/^#+\s+.+/)) {
-          console.log('Found heading:', line);
-
-          // 見出しの詳細情報をオブジェクトとして保存
-          const headingMatch = line.match(/^(#+)\s+(.+)$/);
-          if (headingMatch) {
-            const level = headingMatch[1].length;
-            const text = headingMatch[2];
-            headings.push({
-              level: level,
-              text: text,
-              raw: line
-            });
-          } else {
-            headings.push(line); // フォールバック
-          }
-        }
-      }
-
-      console.log('Extracted headings:', headings);
-      return headings;
     }
   </script>
 </body>
