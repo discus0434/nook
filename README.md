@@ -37,11 +37,14 @@ Reddit、Hacker News、GitHub Trending、技術ブログ、学術論文など多
 ## ✨ 特徴
 
 ### 🔄 多様な情報源からの自動収集・要約
-- **Hacker News**: Hacker Newsから最新のテクノロジーニュースを収集
+- **Hacker News**: Hacker Newsから最新のテクノロジーニュースと議論を収集
 - **GitHub Trending**: GitHubで各言語ごとの人気リポジトリを取得
 - **Reddit**: r/MachineLearningなどのサブレディットから人気投稿を収集して要約
-- **RSS**: RSSフィードを監視し、更新があれば取得して要約
+- **RSS**: 技術ブログなどのRSSフィードを監視し、更新があれば取得して要約
+- **Google Alerts**: 指定したキーワードに関するGoogle検索の新着結果を収集して要約
 - **arXiv論文**: HuggingFaceでキュレーションされた最新の学術論文を自動収集し、HTMLページがあれば論文ごと読んで要約
+- **Product Hunt**: Product Huntから最新のプロダクト情報を収集
+- **Tech News**: TechCrunch (AI, Apps, Funding) と 36kr (AI, Apps, Funding関連) から記事を収集して要約
 
 ### 💬 インタラクティブなチャット機能
 - **フォローアップ質問**: 要約された内容について、さらに詳しく質問可能（グラウンディングあり）
@@ -62,18 +65,23 @@ Reddit、Hacker News、GitHub Trending、技術ブログ、学術論文など多
 <details>
 <summary>必要なツール（クリックして展開）</summary>
 
-- AWS CLI と AWS CDK
-  - CDKでのデプロイには強めの権限が必要です。
-  - 先に`aws configure`でシークレットなどの認証情報を登録する必要があります。
+- `uv`
+  - 依存管理、local service 実行、`cdk.json` 経由の `app.py` 実行に使います。
+- `gh` (GitHub CLI)
+  - Codex ベースの PR 作成・レビュー対応に使用します。
 - Python 3.11
-- Dockerイメージのビルドが可能な環境
-  - `tech_feed`のセットアップにローカルのDockerを使用するらしいです。
 - 以下のAPIキー:
   - Google Gemini API キー（有償）
   - Reddit API キー（クライアントID、クライアントシークレット）
-</details>
+  - Product Hunt API Key
+  - Product Hunt Developer Token
+- Google アカウント（Google AlertsのRSSフィード設定用）
+- AWS で動かす場合のみ:
+  - AWS CLI
+  - AWS CDK
+  - `aws configure` 済みの認証情報
 
-_このアプリはAWSを使用します。ローカルで完結させたい場合は、海行（うみゆき）さんの[フォークしたリポジトリ](https://github.com/umiyuki/nook)をご利用ください。_
+</details>
 
 ### クイックスタート
 
@@ -84,99 +92,99 @@ _このアプリはAWSを使用します。ローカルで完結させたい場�
    ```
 
 2. **環境変数の設定**
-   `.env` ファイルを作成し、以下の内容を設定
+   `.env.example` をコピーして `.env` を作成
+   ```bash
+   cp .env.example .env
    ```
+   `.env` に以下の値を設定
+   ```dotenv
    GEMINI_API_KEY=your_gemini_api_key
+   GEMINI_MODEL=gemini-2.5-flash
    REDDIT_CLIENT_ID=your_reddit_client_id
    REDDIT_CLIENT_SECRET=your_reddit_client_secret
    REDDIT_USER_AGENT=your_reddit_user_agent
+   PRODUCT_HUNT_API_KEY=your_product_hunt_api_key
+   PRODUCT_HUNT_DEVELOPER_TOKEN=your_product_hunt_developer_token
+   # Optional: override the AWS Secrets Manager secret name
+   NOOK_AWS_SECRET_ID=my-nook/runtime-secrets
    ```
 
 3. **依存関係のインストール**
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # Windowsの場合: .venv\Scripts\activate
-   pip install -r requirements.txt
-   pip install -r requirements-dev.txt
+   uv sync --dev
    ```
 
-4. **AWS CDKを使ったデプロイ**
+4. **ローカル品質チェック**
    ```bash
-   make cdk-deploy  # `cdk deploy`ではない
+   make post-change
    ```
 
-5. **アプリにアクセス**
-   デプロイ完了後は、情報収集・要約用のLambdaが毎朝9時に実行されるようになり、その実行後にコンソールに表示される `viewer` 関数のURLからWebインターフェースにアクセスすると、ニュースが閲覧可能になります。
+5. **ローカル macOS / Ubuntu service として登録**
+   ```bash
+   make local-register
+   ```
+
+   collector を手動で 1 本だけ発火したいときは:
+   ```bash
+   make local-trigger SERVICE=reddit_explorer
+   ```
+
+6. **または AWS に一発デプロイ**
+   ```bash
+   make cdk-deploy
+   ```
+   `make cdk-deploy` は repo root の `.env` と process env を merge したうえで、
+   `NOOK_AWS_SECRET_ID` で指定された Secrets Manager secret へ credential を反映してから deploy します。
+   `cdk-synth` / `cdk-diff` / `cdk-deploy` の template には raw secret 値は含まれません。
+
+7. **アプリにアクセス**
+   - local: `http://127.0.0.1:8080`
+   - AWS: デプロイ完了後に表示される `viewer` Function URL
 
 ## 🏗️ アーキテクチャ
 
 ```mermaid
 graph TD
-    %% スタイル定義
-    classDef lambdaStyle fill:#FF9900,stroke:#FF9900,stroke-width:2px,color:white;
-    classDef s3Style fill:#569A31,stroke:#569A31,stroke-width:2px,color:white;
-    classDef eventStyle fill:#FF4F8B,stroke:#FF4F8B,stroke-width:2px,color:white;
-    classDef apiStyle fill:#232F3E,stroke:#232F3E,stroke-width:2px,color:white;
-    classDef userStyle fill:#3B48CC,stroke:#3B48CC,stroke-width:2px,color:white;
+    User[User]
+    Services[nook/services/*]
+    AwsAdapter[nook/deploy/aws/*]
+    LocalAdapter[nook/deploy/local/*]
+    S3[S3]
+    FS[Filesystem]
+    AWS[AWS Lambda + EventBridge]
+    Local[systemd / launchd]
 
-    %% ノード定義
-    User[ユーザー]:::userStyle
-    EventBridge[Amazon EventBridge<br>毎日定時実行]:::eventStyle
-    S3[Amazon S3<br>データストレージ]:::s3Style
-    GeminiAPI[Google Gemini API]:::apiStyle
-
-    %% Lambda関数
-    RedditExplorer[Lambda: reddit_explorer<br>Redditの人気投稿収集・要約]:::lambdaStyle
-    HackerNews[Lambda: hacker_news<br>Hacker News記事収集]:::lambdaStyle
-    GitHubTrending[Lambda: github_trending<br>GitHubトレンド収集]:::lambdaStyle
-    TechFeed[Lambda: tech_feed<br>技術ブログRSS収集・要約]:::lambdaStyle
-    PaperSummarizer[Lambda: paper_summarizer<br>arXiv論文収集・要約]:::lambdaStyle
-    Viewer[Lambda: viewer<br>Webインターフェース・チャット機能]:::lambdaStyle
-
-    %% 外部情報源
-    Reddit[Reddit API]
-    HNSource[Hacker News API]
-    GitHub[GitHub API]
-    RSSFeeds[技術ブログRSSフィード]
-    ArXiv[arXiv API]
-
-    %% 接続関係
-    EventBridge --> RedditExplorer
-    EventBridge --> HackerNews
-    EventBridge --> GitHubTrending
-    EventBridge --> TechFeed
-    EventBridge --> PaperSummarizer
-
-    RedditExplorer --> Reddit
-    HackerNews --> HNSource
-    GitHubTrending --> GitHub
-    TechFeed --> RSSFeeds
-    PaperSummarizer --> ArXiv
-
-    RedditExplorer --> GeminiAPI
-    TechFeed --> GeminiAPI
-    PaperSummarizer --> GeminiAPI
-    Viewer --> GeminiAPI
-
-    RedditExplorer --> S3
-    HackerNews --> S3
-    GitHubTrending --> S3
-    TechFeed --> S3
-    PaperSummarizer --> S3
-
-    S3 --> Viewer
-    User --> Viewer
+    User --> Services
+    Services --> AwsAdapter
+    Services --> LocalAdapter
+    AwsAdapter --> AWS
+    AwsAdapter --> S3
+    LocalAdapter --> Local
+    LocalAdapter --> FS
 ```
+
+- core logic は `nook/services/` に集約されています。
+- AWS 側は `nook/deploy/aws/handlers/` と `nook/deploy/aws/stack.py` が担当します。
+- AWS runtime credential は Secrets Manager から解決し、Lambda environment には runtime metadata と secret identifier に加えて必須の `GEMINI_MODEL` を渡します。
+- local 側は `nook/deploy/local/cli.py` が manifest 生成、register/unregister、viewer 起動、collector 起動を担当します。
+- local service manifest は absolute `uv` path を保持し、systemd collector は `TimeoutStartSec=15min` で実行します。
+- collector / viewer は共通の storage abstraction を通して、local では filesystem backend、AWS では S3 backend を使います。
+- Gemini のモデル指定は `.env` の `GEMINI_MODEL` が必須で、local / AWS の両方で同じ値を使います。未設定なら fail-fast します。
+- Gemini summary が書式に依存する collector では、model からは structured output を受け取り、アプリ側 renderer が Markdown に整形します。現時点では `paper_summarizer` と `reddit_explorer` がこの経路です。
+- TOML ベースの collector 設定は package 内ではなく `configs/<service>/` 配下に置き、runtime では共通 loader から参照します。
+- viewer の retry は既存 Markdown の有無ではなく、更新時刻が進んだことを見て完了判定します。
+- viewer の chat は service 全体ではなく article 単位で動き、client が送る `article_id` / `date` をもとに server 側で対象 article を再解決します。`article_id` は article content fingerprint を種にした per-instance ID で、service/date ごとの state に保存して reload / retry 後も可能な限り再利用します。
+- `make cdk-synth` / `make cdk-diff` / `make cdk-deploy` は stale な `cdk.out` を削除してから実行します。
 
 ## 🛠️ カスタマイズ
 
 ### 情報源の追加・変更
 
-各情報源は設定ファイルで管理されており、簡単にカスタマイズできます:
+各情報源は設定ファイルまたはコード内で管理されており、カスタマイズできます:
 
 #### Reddit
 
-`nook/lambda/reddit_explorer/subreddits.toml` を編集して、収集するサブレディットを変更できます。
+`configs/reddit_explorer/subreddits.toml` を編集して、収集するサブレディットを変更できます。
 
 ```toml
 [[subreddits]]
@@ -189,7 +197,7 @@ name = "LocalLLaMA"
 
 #### GitHub Trending
 
-`nook/lambda/github_trending/languages.toml` を編集して、追跡するプログラミング言語を変更できます。
+`configs/github_trending/languages.toml` を編集して、追跡するプログラミング言語を変更できます。
 
 ```toml
 [[languages]]
@@ -202,7 +210,7 @@ name = "javascript"
 
 #### 技術ブログ
 
-`nook/lambda/tech_feed/feed.toml` を編集して、RSSフィードを追加/変更できます。
+`configs/tech_feed/feed.toml` を編集して、RSSフィードを追加/変更できます。
 
 ```toml
 [[feeds]]
@@ -211,9 +219,115 @@ name = "My Favorite Tech Blog"
 url = "https://example.com/feed.xml"
 ```
 
+#### Tech News
+
+`nook/services/tech_news/service.py` 内の `Config` クラスを編集して、TechCrunch や 36kr のフィードURLやフィルタリングキーワードを変更できます。
+
+```python
+class Config:
+    # ... other settings ...
+    keywords_to_filter = [ # キーワードを追加・削除
+        "ai", "artificial intelligence", "app", "funding", "融资", "人工智能", "new keyword"
+    ]
+
+    feeds: list[FeedConfig] = [
+        {
+            "name": "TechCrunch-AI",
+            "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+            "keywords": None,
+            "feed_name_display": "TechCrunch AI"
+        },
+        # 他のTechCrunchフィード...
+        {
+            "name": "36Kr-News",
+            "url": "https://36kr.com/feed-article",
+            "keywords": keywords_to_filter, # キーワードフィルタを適用
+            "feed_name_display": "36Kr"
+        },
+        # 新しいフィードを追加
+        # {
+        #     "name": "NewSource-Topic",
+        #     "url": "https://newsource.com/topic/feed",
+        #     "keywords": keywords_to_filter, # または None
+        #     "feed_name_display": "New Source Topic"
+        # },
+    ]
+
+```
+
+#### Google Alerts
+
+`configs/google_alerts/google_alerts.toml` を編集して、監視したいキーワードのGoogleアラートRSSフィードを追加/変更できます。
+
+1.  [Google アラート](https://www.google.com/alerts) にアクセスします。
+2.  目的のキーワードでアラートを作成します。
+3.  アラートのオプションで「配信先」を「RSSフィード」に設定します。
+4.  作成されたアラートの横にあるRSSアイコンをクリックし、表示されるフィードのURLをコピーします。
+5.  コピーしたURLを `configs/google_alerts/google_alerts.toml` に追加します。
+
+```toml
+# 例:
+[[alerts]]
+name = "監視したいキーワード"
+url = "ここにコピーしたRSSフィードのURLを貼り付け"
+
+[[alerts]]
+name = "別のキーワード"
+url = "別のRSSフィードURL"
+```
+
 ### UI設定
 
-`nook/lambda/viewer/templates/index.html` を編集して、UIをカスタマイズすることもできます。
+viewer の見た目や挙動は以下を編集してカスタマイズできます。
+
+- `nook/services/viewer/templates/index.html`: HTML の骨組みと初期表示の server-side render
+- `nook/services/viewer/static/viewer.css`: スタイル
+- `nook/services/viewer/static/viewer.js`: クライアント側の状態管理と描画
+
+## 🧑‍💻 開発フロー
+
+### Codex前提の運用ファイル
+
+- `AGENTS.md`: このリポジトリで Codex / AGENT が従うルール
+- `.codex/config.toml`: Codex のローカル設定
+- `.codex/skills/`: repo-local skill 群
+- `docs/`: 現況の設計・運用ドキュメント
+- `specs/`: 中規模以上の変更時に一時的に置く技術仕様書
+
+### よく使うコマンド
+
+```bash
+uv sync --dev
+make post-change
+make test ARGS='-k config'
+make local-register
+make local-trigger SERVICE=tech_feed
+make cdk-synth
+make cdk-diff
+make cdk-deploy
+```
+
+`cdk.json` は `uv run python app.py` を使うので、CDK 実行時に追加の仮想環境 activation は不要です。
+
+### テストの考え方
+
+- 自動テストは `tests/unit/` のみを `pytest` で収集します。
+- `tests/test_*.py` にある既存のネットワーク/API確認用スクリプトは手動チェック用途として残しています。
+- 手動チェックは以下のターゲットから実行できます。
+
+```bash
+make manual-feed
+make manual-rss
+make manual-tech-news-feeds
+make manual-product-hunt
+```
+
+### 仕様駆動フロー
+
+- 変更が中規模以上になる場合は `specs/TEMPLATE.md` をコピーして技術仕様書を作成します。
+- 実装後は `make spec-review` / `make spec-implementation-review` で Codex に read-only レビューさせる前提です。
+- docs は追記ではなく上書きで最新状態に保ち、変更履歴は Git history / PR / Issue で追います。
+- spec は作業中だけ `specs/` に置き、完了後は削除します。
 
 ## 🔄 使用例
 
@@ -239,7 +353,7 @@ url = "https://example.com/feed.xml"
 
 ### API連携
 
-Nookが収集した情報はS3へ日毎に保存されるので、他のアプリケーションやワークフローと連携することも可能です：
+Nookが収集した情報はS3へ日毎に保存されるので、他のアプリケーションやワークフローと連携することも可能です。
 
 ```python
 import boto3

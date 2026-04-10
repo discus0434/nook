@@ -1,63 +1,67 @@
+[project]
+name = "my-nook"
+version = "0.1.0"
+description = "Daily tech digest web app that runs on AWS or as local services."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "aws-cdk-lib==2.122.0",
+    "arxiv>=2.2.0",
+    "beautifulsoup4>=4.13.5",
+    "boto3>=1.40.20",
+    "constructs>=10.0.0,<11.0.0",
+    "fastapi>=0.118.0",
+    "feedparser>=6.0.11",
+    "google-genai==1.2.0",
+    "gql[aiohttp]>=3.5.3",
+    "httpx>=0.27.2",
+    "jinja2>=3.1.6",
+    "lxml>=6.0.1",
+    "mangum>=0.19.0",
+    "markdown>=3.9",
+    "praw>=7.8.1",
+    "python-dotenv==1.0.0",
+    "regex>=2025.9.18",
+    "requests>=2.32.5",
+    "sgmllib3k>=1.0.0",
+    "tenacity==9.0.0",
+    "tqdm>=4.67.1",
+    "uvicorn>=0.37.0",
+    "json-repair>=0.58.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytz>=2025.2",
+    "pytest>=9.0.2",
+    "ruff>=0.14.11",
+]
+
 [tool.ruff]
 line-length = 88
 indent-width = 4
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
-exclude = [".venv"]
+exclude = [".venv", "cdk.out"]
 select = [
-    "B",  # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "E",  # pycodestyle errors
-    "G",
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "UP",  # pyupgrade
-    "EXE",
+    "E",
+    "W",
     "F",
-    "SIM1",
-    # Not included in flake8
-    "LOG",
-    "NPY",
-    "PERF",
-    "PGH004",
-    "PIE794",
-    "PIE800",
-    "PIE804",
-    "PIE807",
-    "PIE810",
-    "PLC0131", # type bivariance
-    "PLC0132", # type param mismatch
-    "PLC0205", # string as __slots__
-    "PLE",
-    "PLR0133", # constant comparison
-    "PLR0206", # property with params
-    "PLR1722", # use sys exit
-    "PLW0129", # assert on string literal
-    "PLW0406", # import self
-    "PLW0711", # binary op exception
-    "PLW1509", # preexec_fn not safe with threads
-    "PLW3301", # nested min max
-    "PT006", # TODO: enable more PT rules
-    "PT022",
-    "PT023",
-    "PT024",
-    "PT025",
-    "PT026",
-    "PYI",
-    "RUF008", # mutable dataclass default
-    "RUF015", # access first ele in constant time
-    "RUF016", # type error non-integer index
-    "RUF017",
-    "TRY200", # TODO: migrate from deprecated alias
-    "TRY302",
+    "I",
+    "B",
+    "SIM",
+    "RUF",
 ]
 ignore = [
-    "G004",
-    "F821",
-    "C401",
-    "C408",
-    "PERF203",
-    "PERF401",
+    "E501",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "RUF012",
+    "SIM108",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests/unit"]

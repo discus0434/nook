@@ -1,0 +1,21 @@
+model = "gpt-5.4"
+review_model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+web_search = "live"
+
+[sandbox_workspace_write]
+network_access = true
+
+[features]
+shell_snapshot = true
+js_repl = true
+multi_agent = true
+prevent_idle_sleep = false
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false

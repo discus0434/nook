@@ -1,16 +1,24 @@
 *.swp
+*.py[cod]
 package-lock.json
-__pycache__
-.pytest_cache
-.venv
-*.egg-info
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+build/
+dist/
 
 # CDK asset staging directory
-.cdk.staging
-cdk.out
+.cdk.staging/
+cdk.out/
 
 node_modules/
 
 .env
+.envrc
 
 .DS_Store

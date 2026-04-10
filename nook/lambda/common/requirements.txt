@@ -1,2 +1,0 @@
-google-genai==1.2.0
-tenacity==9.0.0
