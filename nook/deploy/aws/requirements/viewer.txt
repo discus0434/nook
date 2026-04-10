@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+boto3==1.34.35
+markdown
+mangum
+jinja2
+requests==2.31.0
+httpx==0.27.2
+beautifulsoup4==4.12.3

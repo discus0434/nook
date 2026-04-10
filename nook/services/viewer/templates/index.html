@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>my-nook viewer</title>
+  <link rel="icon" type="image/svg+xml" href="https://api.dicebear.com/7.x/shapes/svg?seed=nook">
+  <link rel="icon" type="image/png" href="https://api.dicebear.com/7.x/shapes/png?seed=nook&size=32" sizes="32x32">
+  <link rel="icon" type="image/png" href="https://api.dicebear.com/7.x/shapes/png?seed=nook&size=16" sizes="16x16">
+  <link rel="apple-touch-icon" href="https://api.dicebear.com/7.x/shapes/png?seed=nook&size=180">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+  <link rel="stylesheet" href="{{ request.url_for('static', path='viewer.css') }}?v={{ asset_version }}">
+  <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <script defer src="{{ request.url_for('static', path='viewer.js') }}?v={{ asset_version }}"></script>
+</head>
+<body>
+  <button id="scrollTopBtn" type="button" title="Go to top" aria-label="Scroll to top">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+      <path fill-rule="evenodd" d="M8 12a.5.5 0 0 0 .5-.5V5.707l2.146 2.147a.5.5 0 0 0 .708-.708l-3-3a.5.5 0 0 0-.708 0l-3 3a.5.5 0 1 0 .708.708L7.5 5.707V11.5a.5.5 0 0 0 .5.5"/>
+    </svg>
+  </button>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="toast-header">
+        <img src="https://api.dicebear.com/7.x/shapes/svg?seed=nook" class="rounded me-2" alt="nook icon" width="20" height="20">
+        <strong class="me-auto">my-nook</strong>
+        <small>Just now</small>
+        <button type="button" class="btn-close" aria-label="Close"></button>
+      </div>
+      <div class="toast-body"></div>
+    </div>
+  </div>
+
+  <nav class="navbar">
+    <div class="container">
+      <a class="navbar-brand" href="/">
+        <img src="https://api.dicebear.com/7.x/shapes/svg?seed=nook" alt="nook">
+        my-nook
+      </a>
+      <div class="ambient-info">
+        <span id="clock">--:--</span>
+        <span class="separator">·</span>
+        <span id="weather">--</span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container main-content">
+    <div class="row">
+      <div class="col-md-3">
+        <div class="sidebar-sticky">
+          <div class="content-container">
+            <form id="date-form" action="/" method="get">
+              <div class="mb-3">
+                <label for="date" class="form-label">Date</label>
+                <input
+                  id="date"
+                  name="date"
+                  class="form-control"
+                  type="text"
+                  value="{{ page.date }}"
+                  placeholder="YYYY-MM-DD"
+                >
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Load</button>
+            </form>
+
+            <div class="toc">
+              <h5>Contents</h5>
+              <ul id="toc-list" class="toc-list">
+                {% if initial_render.headings %}
+                  {% for heading in initial_render.headings %}
+                    <li class="toc-item">
+                      <a
+                        class="toc-link{% if loop.first %} active{% endif %}"
+                        href="#{{ heading.anchor }}"
+                        data-level="{{ heading.level }}"
+                      >{{ heading.text }}</a>
+                    </li>
+                  {% endfor %}
+                {% else %}
+                  <li class="toc-item"><span class="empty-state">No headings</span></li>
+                {% endif %}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-9">
+        <div class="content-container">
+          <ul class="nav nav-tabs" id="app-nav" role="tablist">
+            {% for tab in initial_render.tabs %}
+              <li class="nav-item" role="presentation">
+                <button
+                  type="button"
+                  role="tab"
+                  class="nav-link{% if tab.is_active %} active{% endif %}"
+                  data-app-name="{{ tab.app_name }}"
+                >{{ tab.label }}</button>
+              </li>
+            {% endfor %}
+          </ul>
+
+          <div class="content-toolbar">
+            <div class="toolbar-actions">
+              <p id="status-message" class="status-message"></p>
+              <button id="retry-button" type="button" class="btn btn-primary btn-sm">Retry Now</button>
+            </div>
+          </div>
+
+          <div
+            id="missing-alert"
+            class="alert alert-warning{% if not initial_render.missing_message %} d-none{% endif %}"
+            role="alert"
+          >{{ initial_render.missing_message or "" }}</div>
+          <div id="article-content" class="article-list">
+            {% if initial_render.articles %}
+              {% for article in initial_render.articles %}
+                <section class="article-section" data-article-id="{{ article.article_id }}">
+                  <div class="article-body markdown-content">{{ article.html | safe }}</div>
+                  <div class="chat-container article-chat-container">
+                    <div class="chat-log article-chat-log" data-article-id="{{ article.article_id }}"></div>
+                    <form class="chat-input article-chat-form" data-article-id="{{ article.article_id }}">
+                      <textarea
+                        class="form-control article-chat-input"
+                        data-article-id="{{ article.article_id }}"
+                        placeholder="Ask a question about this article..."
+                      ></textarea>
+                      <button
+                        type="submit"
+                        class="btn btn-primary article-chat-submit"
+                      >Ask</button>
+                    </form>
+                  </div>
+                </section>
+              {% endfor %}
+            {% elif initial_render.missing_message %}
+              <p class="empty-state">Content for this date is not available.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script id="viewer-state" type="application/json">{{ page_state_json | safe }}</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Example configuration for Google Alerts RSS feeds.
+# 1. Go to Google Alerts (https://www.google.com/alerts)
+# 2. Create an alert for your desired keyword.
+# 3. In the alert options, set "Deliver to" to "RSS feed".
+# 4. Click the RSS icon next to the alert and copy the feed URL.
+# 5. Paste the URL below, replacing the example URL.
+
+[[alerts]]
+name = "生成AI 資金調達"
+url = "https://www.google.co.jp/alerts/feeds/13634149226901211919/7300498553591664023"
