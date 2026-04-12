@@ -348,9 +348,6 @@ def _ensure_viewer_service(app_name: str) -> None:
 
 
 def _initial_app_name(page: ViewerPage) -> str | None:
-    for app_name in page.app_names:
-        if page.markdown_exists.get(app_name):
-            return app_name
     return page.app_names[0] if page.app_names else None
 
 

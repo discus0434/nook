@@ -33,6 +33,10 @@ function slugify(text, index) {
   return normalized || `section-${index}`;
 }
 
+function resolveInitialApp(appNames) {
+  return appNames[0] || null;
+}
+
 if (typeof window !== "undefined") {
   window.__myNookViewerTestHooks = {
     buildMarkdownRequestPath,
@@ -42,6 +46,7 @@ if (typeof window !== "undefined") {
     cloneHeadings,
     flattenArticleHeadings,
     reconcileChatHistory,
+    resolveInitialApp,
     slugify,
   };
 }
@@ -118,10 +123,7 @@ function bootstrapViewer() {
     markdownUpdatedAt: { ...initialState.markdown_updated_at },
     weather: { ...initialState.weather_data },
     currentDate: initialState.date,
-    currentApp:
-      initialState.app_names.find((name) => initialState.markdown_exists[name]) ||
-      initialState.app_names[0] ||
-      null,
+    currentApp: resolveInitialApp(initialState.app_names),
     chatHistory: buildInitialChatHistory(
       initialState.app_names,
       initialState.articles || {},

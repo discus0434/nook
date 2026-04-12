@@ -26,6 +26,11 @@ vm.runInNewContext(source, sandbox, {{ filename: "viewer.js" }});
 const hooks = window.__myNookViewerTestHooks;
 assert.ok(hooks);
 assert.equal(
+  hooks.resolveInitialApp(["tech_news", "tech_feed"]),
+  "tech_news",
+);
+assert.equal(hooks.resolveInitialApp([]), null);
+assert.equal(
   hooks.buildMarkdownRequestPath(
     "tech_feed",
     "2026-04-08",

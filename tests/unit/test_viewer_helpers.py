@@ -92,7 +92,7 @@ def test_load_viewer_page_builds_contents_and_existence_map() -> None:
     ]
 
 
-def test_build_initial_render_prefers_first_available_markdown() -> None:
+def test_build_initial_render_uses_first_tab_even_when_markdown_is_missing() -> None:
     from nook.services.viewer.content import build_initial_render, load_viewer_page
 
     page = load_viewer_page(
@@ -103,32 +103,15 @@ def test_build_initial_render_prefers_first_available_markdown() -> None:
 
     initial_render = build_initial_render(page)
 
-    assert initial_render.current_app == "tech_feed"
-    assert initial_render.tabs[1].is_active is True
-    assert initial_render.tabs[1].label == "Feeds"
-    assert initial_render.article_title == "Feeds"
-    assert (
-        initial_render.article_meta == "2026-04-08 · Updated 2026-04-08T00:01:00+00:00"
-    )
-    assert initial_render.missing_message is None
-    assert len(initial_render.articles) == 2
-    first_article = initial_render.articles[0]
-    second_article = initial_render.articles[1]
-    assert first_article.article_id.startswith("article-tech_feed-")
-    assert initial_render.articles[0].title == "First Article"
-    assert (
-        f'<h1 class="md-heading md-h1" id="heading-{first_article.article_id}-0-first-article">First Article</h1>'
-        in first_article.html
-    )
-    assert second_article.article_id.startswith("article-tech_feed-")
-    assert [heading.text for heading in initial_render.headings] == [
-        "First Article",
-        "Second Article",
-    ]
-    assert (
-        initial_render.headings[0].anchor
-        == f"heading-{first_article.article_id}-0-first-article"
-    )
+    assert initial_render.current_app == "tech_news"
+    assert initial_render.tabs[0].is_active is True
+    assert initial_render.tabs[0].label == "News"
+    assert initial_render.tabs[1].is_active is False
+    assert initial_render.article_title == "News"
+    assert initial_render.article_meta == "2026-04-08"
+    assert initial_render.missing_message == "Content for 2026-04-08 not found."
+    assert initial_render.articles == []
+    assert initial_render.headings == []
 
 
 def test_build_initial_render_returns_missing_state_when_markdown_is_unavailable() -> (

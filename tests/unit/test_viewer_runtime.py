@@ -108,8 +108,10 @@ def test_create_app_reads_markdown_and_triggers_local_job() -> None:
     assert 'class="navbar"' in index_response.text
     assert 'class="sidebar-sticky"' in index_response.text
     assert 'class="nav nav-tabs"' in index_response.text
+    assert 'data-app-name="tech_news"' in index_response.text
+    assert index_response.text.count('class="nav-link active"') == 1
     assert 'data-app-name="tech_feed"' in index_response.text
-    assert 'class="nav-link active"' in index_response.text
+    assert ">News<" in index_response.text
     assert ">Feeds<" in index_response.text
     assert (
         '<img src="https://api.dicebear.com/7.x/shapes/svg?seed=nook" alt="nook">'
@@ -119,23 +121,20 @@ def test_create_app_reads_markdown_and_triggers_local_job() -> None:
     assert ">Load<" in index_response.text
     assert ">Contents<" in index_response.text
     assert ">Retry Now<" in index_response.text
-    assert "Ask a question about this article..." in index_response.text
-    assert (
-        '<p class="empty-state">Ask a question about this article.</p>'
-        not in index_response.text
-    )
+    assert "Content for 2026-04-08 not found." in index_response.text
+    assert "Content for this date is not available." in index_response.text
+    assert "Ask a question about this article..." not in index_response.text
     assert 'id="article-title"' not in index_response.text
     assert 'id="article-meta"' not in index_response.text
     assert "Updated 2026-04-08T00:01:00+00:00" not in index_response.text
-    assert index_response.text.count('class="article-section"') == 2
-    assert index_response.text.count('class="chat-input article-chat-form"') == 2
-    assert f'data-article-id="{article_ids[0]}"' in index_response.text
-    assert f'data-article-id="{article_ids[1]}"' in index_response.text
+    assert index_response.text.count('class="article-section"') == 0
+    assert 'class="chat-input article-chat-form"' not in index_response.text
+    assert f'data-article-id="{article_ids[0]}"' not in index_response.text
+    assert f'data-article-id="{article_ids[1]}"' not in index_response.text
     assert (
-        f'<h1 class="md-heading md-h1" id="heading-{article_ids[0]}-0-first-article">First Article</h1>'
-        in index_response.text
+        f'href="#heading-{article_ids[0]}-0-first-article"' not in index_response.text
     )
-    assert f'href="#heading-{article_ids[0]}-0-first-article"' in index_response.text
+    assert "No headings" in index_response.text
     assert "Collected signals, one surface." not in index_response.text
     assert "追加調査つきで質問できます。" not in index_response.text
     assert markdown_response.status_code == 200
@@ -279,6 +278,9 @@ def test_create_app_server_renders_missing_state_without_javascript() -> None:
     index_response = client.get("/", params={"date": "2026-04-09"})
 
     assert index_response.status_code == 200
+    assert 'data-app-name="tech_news"' in index_response.text
+    assert index_response.text.count('class="nav-link active"') == 1
+    assert ">News<" in index_response.text
     assert 'data-app-name="hacker_news"' in index_response.text
     assert ">HN<" in index_response.text
     assert 'value="2026-04-09"' in index_response.text
