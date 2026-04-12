@@ -21,7 +21,7 @@ nook は、日々公開される技術ニュース、論文、OSS、プロダク
 - Hugging Face Daily Papers 経由の論文情報
 - `configs/tech_news/feed.toml` に定義した任意の RSS 一覧
 
-補足として、`reddit_explorer` は取得した投稿全体を upvote の多い順に並べて出力し、`paper_summarizer` は Hugging Face Daily Papers の upvote が多い論文から順に処理します。`tech_news` は複数の RSS を横断して集約でき、feed ごとに任意の `keywords` フィルタを付けられます。
+`tech_news` は複数の RSS を横断して集約でき、feed ごとに任意の `keywords` フィルタを付けられます。
 
 ## 前提環境
 
@@ -52,7 +52,7 @@ nook は、日々公開される技術ニュース、論文、OSS、プロダク
 3. `.env` に必要な値を設定します。
 
    ```dotenv
-   LLM_MODEL=openai:gpt-5.2
+   LLM_MODEL=openai:gpt-5.4-mini
    OPENAI_API_KEY=your_openai_api_key
    REDDIT_CLIENT_ID=your_reddit_client_id
    REDDIT_CLIENT_SECRET=your_reddit_client_secret
@@ -69,7 +69,7 @@ nook は、日々公開される技術ニュース、論文、OSS、プロダク
    # NOOK_AWS_SECRET_ID=nook/runtime-secrets
    ```
 
-   `LLM_MODEL` には `openai:gpt-5.2` のような provider/model 形式の文字列を指定します。viewer の追加質問では、対応している provider の場合だけ組み込みの Web 検索を使います。非対応 provider では通常のチャットとして動きます。
+   `LLM_MODEL` には `openai:gpt-5.4-mini` のような provider/model 形式の文字列を指定します。viewer の追加質問では、対応している provider の場合だけ組み込みの Web 検索を使います。非対応 provider では通常のチャットとして動きます。
 
 4. 依存関係をインストールします。
 
