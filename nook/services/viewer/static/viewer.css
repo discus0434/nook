@@ -558,7 +558,9 @@ body {
   margin-bottom: 0.5rem;
   margin-top: 0.5rem;
   max-height: 300px;
-  max-width: 300px;
+  max-width: 96px;
+  min-width: 56px;
+  width: 8%;
 }
 
 #scrollTopBtn {

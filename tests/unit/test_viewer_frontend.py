@@ -149,3 +149,18 @@ assert.equal(
         check=True,
         text=True,
     )
+
+
+def test_viewer_styles_fix_product_hunt_thumbnail_width() -> None:
+    viewer_css_path = (
+        Path(__file__).resolve().parents[2]
+        / "nook"
+        / "services"
+        / "viewer"
+        / "static"
+        / "viewer.css"
+    )
+    source = viewer_css_path.read_text(encoding="utf-8")
+
+    assert ".product-thumbnail" in source
+    assert "width: 8%;" in source

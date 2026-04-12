@@ -33,12 +33,33 @@ TAB_LABELS = {
     "paper_summarizer": "Papers",
     "google_alerts": "Alerts",
 }
+VIEWER_TAB_PRIORITY = (
+    "tech_news",
+    "tech_feed",
+    "hacker_news",
+    "product_hunt",
+    "github_trending",
+    "paper_summarizer",
+    "google_alerts",
+)
 
 ARTICLE_IDENTITY_STATE_VERSION = 1
 
 
 def viewer_service_names() -> list[str]:
-    return [definition.name for definition in get_viewer_services()]
+    service_names = [definition.name for definition in get_viewer_services()]
+    priority_by_name = {
+        service_name: index for index, service_name in enumerate(VIEWER_TAB_PRIORITY)
+    }
+    indexed_names = list(enumerate(service_names))
+    ordered_names = sorted(
+        indexed_names,
+        key=lambda item: (
+            priority_by_name.get(item[1], len(priority_by_name)),
+            item[0],
+        ),
+    )
+    return [service_name for _, service_name in ordered_names]
 
 
 def load_viewer_page(
