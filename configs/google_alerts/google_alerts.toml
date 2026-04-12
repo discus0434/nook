@@ -6,5 +6,5 @@
 # 5. Paste the URL below, replacing the example URL.
 
 [[alerts]]
-name = "生成AI 資金調達"
-url = "https://www.google.co.jp/alerts/feeds/13634149226901211919/7300498553591664023"
+name = "Example Keyword"
+url = "https://www.google.com/alerts/feeds/<your-alert-id>/<your-feed-id>"

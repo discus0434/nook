@@ -10,7 +10,7 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
   - `nook/deploy/aws/stack.py` が Lambda 群、viewer Function URL、日次 EventBridge を定義する。
   - `nook/deploy/aws/cli.py` は repo root の `.env` と process env を merge し、その env で Secrets Manager secret bootstrap と CDK 実行を行う。
   - collector handler は `nook/deploy/aws/handlers/` の薄い wrapper で、core logic は `nook/services/` に置く。
-  - Lambda environment には `BUCKET_NAME`、`GEMINI_MODEL`、`NOOK_RUNTIME_MODE`、`NOOK_STORAGE_BACKEND`、`NOOK_AWS_SECRET_ID` を渡す。runtime credential は Secrets Manager から読む。
+  - Lambda environment には `BUCKET_NAME`、`LLM_MODEL`、`NOOK_RUNTIME_MODE`、`NOOK_STORAGE_BACKEND`、`NOOK_AWS_SECRET_ID` を渡す。runtime credential は Secrets Manager から読む。
   - Markdown と補助 state は S3 に保存する。
 - Local:
   - `nook/deploy/local/cli.py` が service 登録、削除、viewer 起動、collector 単発起動を担当する。
@@ -33,10 +33,12 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
 - `nook/services/runtime.py`
   - runtime mode、repo root、viewer listen address、job invoker を解決する。
 - `nook/services/runtime_secrets.py`
-  - local env と AWS Secrets Manager から runtime credential を解決する。
-- `nook/services/gemini_client.py`
-  - Gemini client の thin wrapper。必須 env `GEMINI_MODEL` を既定モデルとして解決し、APIError に加えて transient な network timeout / connection error も retry する。
-  - structured output では SDK の `response.parsed` を優先し、raw text fallback が必要な場合も JSON object text のみを受け付ける。code fence、trailing comma、missing comma のような軽微な JSON 崩れだけを repair してから schema validate する。
+  - local env と AWS Secrets Manager から runtime credential を解決する。fixed app secret に加えて `*_API_KEY` を runtime secret として扱い、AWS runtime では process env へ注入する。
+- `nook/services/llm_client.py`
+  - PydanticAI client の thin wrapper。必須 env `LLM_MODEL` を既定モデルとして解決し、transient な network timeout / connection error と retryable HTTP status を retry する。
+  - `google-gla` / `google-vertex` では thread / Lambda runtime での event loop conflict を避けるため、呼び出しごとに dedicated `httpx.AsyncClient` と concrete Google model を組み立て、実行後に close する。
+  - 既に running event loop がある call site では `Agent.run_sync()` を直接叩かず、worker thread へ退避して同期 API を維持する。
+  - text output、structured output、viewer chat 用 prompt を共通化する。viewer chat search は provider が対応している場合のみ built-in `WebSearchTool` を使う。
 - `nook/services/viewer/app.py`
   - storage / job invoker 注入型の FastAPI app factory を提供し、初期表示用の server-render context も template へ渡す。chat request では `app_name + date + article_id` から対象 article instance を再解決する。
 - `nook/services/viewer/content.py`
@@ -51,13 +53,16 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
   - viewer の CSS / JavaScript asset を置く。
 - `nook/services/<collector>/service.py`
   - collector の core logic を持つ package。Lambda handler は置かず、設定は `configs/` から読む。
-  - `paper_summarizer` は論文本文が大きいため、他 collector より長い Gemini request timeout を使う。
+  - `paper_summarizer` は論文本文が大きいため、他 collector より長い LLM request timeout を使う。
+  - `paper_summarizer` は Hugging Face papers API の `upvotes` を使って新着 paper を降順に並べ、既読 ID を除いた順で処理する。
+  - `reddit_explorer` は設定された subreddit 群から集めた post を一度集約し、`upvotes` 降順で markdown 化する。
 - `nook/services/registry.py`
   - service 名から collector runner / class を解決する。
 - `nook/deploy/aws/handlers/`
   - Lambda handler 群。EventBridge / Lambda invoke を受けて core service を呼ぶ唯一の entrypoint。
 - `nook/deploy/aws/runtime_config.py`
   - AWS stack config、runtime environment、requirements path、bundle に含める source dir を定義する。
+  - `paper_summarizer` は 2048 MB、それ以外の LLM-heavy collector (`product_hunt`, `hacker_news`, `github_trending`, `reddit_explorer`, `tech_feed`, `google_alerts`, `tech_news`) と `viewer` は 512 MB を使う。
 - `nook/deploy/aws/secret_bootstrap.py`
   - deploy 前の Secrets Manager upsert を担当する。
 - `nook/deploy/aws/requirements/`
@@ -74,7 +79,7 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
 1. `make cdk-deploy` は repo root の `.env` と process env を merge した credential を Secrets Manager secret へ upsert してから CDK deploy を実行する。
 2. EventBridge が collector Lambda を日次で起動する。
 3. collector handler が `nook/services/registry.py` 経由で core service を実行する。
-4. collector / viewer は runtime で Secrets Manager から credential を取得し、`StorageBackend` 越しに S3 へ Markdown / state を読み書きしながら外部 API / RSS / Gemini を使う。
+4. collector / viewer は runtime で Secrets Manager から credential を取得し、`StorageBackend` 越しに S3 へ Markdown / state を読み書きしながら外部 API / RSS / LLM を使う。
    collector config の TOML は bundle された `configs/` から読む。
 5. viewer Lambda は S3 から Markdown を読み、Function URL 経由で UI と chat API を提供する。
 6. viewer の retry API は collector Lambda を非同期 invoke する。
@@ -99,7 +104,7 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
 ## 設定 / データモデル
 
 - runtime env:
-  - `GEMINI_MODEL`: 必須の Gemini モデル名
+  - `LLM_MODEL`: 必須の provider/model string
   - `NOOK_RUNTIME_MODE`: `aws` または `local`
   - `NOOK_REPO_ROOT`: config path と local runtime path 解決の基準 repo root
   - `NOOK_STORAGE_BACKEND`: `s3` または `filesystem`
@@ -108,15 +113,15 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
   - `NOOK_UV_EXECUTABLE`: local viewer が retry 用 collector command を組み立てるときの absolute `uv` path
 - `NOOK_AWS_SECRET_ID`: AWS runtime が参照する Secrets Manager secret name / ARN
 - local / deploy bootstrap 用 env:
-  - `GEMINI_API_KEY`
-  - `GEMINI_MODEL` (required)
+  - `LLM_MODEL` (required)
+  - `*_API_KEY` (`OPENAI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` など)
   - `REDDIT_CLIENT_ID`
   - `REDDIT_CLIENT_SECRET`
   - `REDDIT_USER_AGENT`
   - `PRODUCT_HUNT_API_KEY`
   - `PRODUCT_HUNT_DEVELOPER_TOKEN`
 - AWS secret JSON keys:
-  - `GEMINI_API_KEY`
+  - `*_API_KEY`
   - `REDDIT_CLIENT_ID`
   - `REDDIT_CLIENT_SECRET`
   - `REDDIT_USER_AGENT`
@@ -127,6 +132,7 @@ Nook は collector 群と viewer を `nook/services/` 配下のマイクロサ�
   - 補助 state: `<data_dir>/_state/<service>/<key>`
 - collector config layout:
   - `configs/tech_feed/feed.toml`
+  - `configs/tech_news/feed.toml`
   - `configs/google_alerts/google_alerts.toml`
   - `configs/github_trending/languages.toml`
   - `configs/reddit_explorer/subreddits.toml`

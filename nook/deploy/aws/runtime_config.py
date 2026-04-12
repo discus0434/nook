@@ -18,6 +18,10 @@ SERVICE_REQUIREMENTS = {
 }
 MEMORY_SIZES = {
     "paper_summarizer": 2048,
+    "product_hunt": 512,
+    "hacker_news": 512,
+    "github_trending": 512,
+    "reddit_explorer": 512,
     "tech_feed": 512,
     "google_alerts": 512,
     "tech_news": 512,
@@ -34,17 +38,17 @@ EXTRA_INSTALL_COMMANDS = {
 @dataclass(frozen=True, slots=True)
 class AwsStackConfig:
     runtime_secret_id: str
-    gemini_model: str
+    llm_model: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str | None]) -> "AwsStackConfig":
-        gemini_model = env.get("GEMINI_MODEL")
-        if not gemini_model:
-            raise ValueError("Missing required environment variable: GEMINI_MODEL")
+        llm_model = env.get("LLM_MODEL")
+        if not llm_model:
+            raise ValueError("Missing required environment variable: LLM_MODEL")
         return cls(
             runtime_secret_id=env.get(AWS_RUNTIME_SECRET_ID_ENV)
             or DEFAULT_AWS_RUNTIME_SECRET_ID,
-            gemini_model=gemini_model,
+            llm_model=llm_model,
         )
 
 
@@ -52,11 +56,11 @@ def build_runtime_environment(
     *,
     bucket_name: str,
     runtime_secret_id: str,
-    gemini_model: str,
+    llm_model: str,
 ) -> dict[str, str]:
     return {
         "BUCKET_NAME": bucket_name,
-        "GEMINI_MODEL": gemini_model,
+        "LLM_MODEL": llm_model,
         "NOOK_RUNTIME_MODE": "aws",
         "NOOK_STORAGE_BACKEND": "s3",
         AWS_RUNTIME_SECRET_ID_ENV: runtime_secret_id,

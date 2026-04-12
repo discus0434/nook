@@ -1,9 +1,12 @@
 import json
 from argparse import Namespace
+from importlib.metadata import requires
 from pathlib import Path
 
 import pytest
 from botocore.exceptions import ClientError
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 from nook.services.catalog import SERVICE_DEFINITIONS
 
@@ -32,39 +35,53 @@ class FakeSecretsManagerClient:
         return {"ARN": SecretId}
 
 
-def test_aws_stack_config_requires_gemini_model() -> None:
+def test_aws_stack_config_requires_llm_model() -> None:
     from nook.deploy.aws.runtime_config import AwsStackConfig
 
     with pytest.raises(
-        ValueError, match="Missing required environment variable: GEMINI_MODEL"
+        ValueError, match="Missing required environment variable: LLM_MODEL"
     ):
         AwsStackConfig.from_env({})
 
 
-def test_aws_stack_config_reads_optional_gemini_model() -> None:
+def test_aws_stack_config_reads_required_llm_model() -> None:
     from nook.deploy.aws.runtime_config import AwsStackConfig
 
-    config = AwsStackConfig.from_env({"GEMINI_MODEL": "gemini-2.5-flash"})
+    config = AwsStackConfig.from_env({"LLM_MODEL": "openai:gpt-5.2"})
 
-    assert config.gemini_model == "gemini-2.5-flash"
+    assert config.llm_model == "openai:gpt-5.2"
 
 
-def test_build_runtime_environment_includes_required_gemini_model() -> None:
+def test_build_runtime_environment_includes_required_llm_model() -> None:
     from nook.deploy.aws.runtime_config import build_runtime_environment
 
     environment = build_runtime_environment(
         bucket_name="bucket-name",
         runtime_secret_id="my-nook/runtime-secrets",
-        gemini_model="gemini-2.5-flash",
+        llm_model="openai:gpt-5.2",
     )
 
     assert environment == {
         "BUCKET_NAME": "bucket-name",
-        "GEMINI_MODEL": "gemini-2.5-flash",
+        "LLM_MODEL": "openai:gpt-5.2",
         "NOOK_RUNTIME_MODE": "aws",
         "NOOK_STORAGE_BACKEND": "s3",
         "NOOK_AWS_SECRET_ID": "my-nook/runtime-secrets",
     }
+
+
+def test_memory_sizes_assign_llm_collectors_more_than_default_memory() -> None:
+    from nook.deploy.aws.runtime_config import MEMORY_SIZES
+
+    assert MEMORY_SIZES["paper_summarizer"] == 2048
+    assert MEMORY_SIZES["product_hunt"] == 512
+    assert MEMORY_SIZES["hacker_news"] == 512
+    assert MEMORY_SIZES["github_trending"] == 512
+    assert MEMORY_SIZES["reddit_explorer"] == 512
+    assert MEMORY_SIZES["tech_feed"] == 512
+    assert MEMORY_SIZES["google_alerts"] == 512
+    assert MEMORY_SIZES["tech_news"] == 512
+    assert MEMORY_SIZES["viewer"] == 512
 
 
 def test_requirements_paths_exist_for_all_services() -> None:
@@ -83,19 +100,68 @@ def test_requirements_paths_exist_for_all_services() -> None:
         assert requirements_path_for(definition.name).exists(), definition.name
 
 
+def test_aws_requirements_dependency_constraints_match_pydanticai_floors() -> None:
+    from nook.deploy.aws.runtime_config import (
+        COMMON_REQUIREMENTS,
+        requirements_path_for,
+    )
+
+    pydantic_ai_slim_requirements = requires("pydantic-ai-slim") or []
+
+    def dependency_floor(package_name: str) -> Version:
+        requirement = next(
+            Requirement(requirement_text)
+            for requirement_text in pydantic_ai_slim_requirements
+            if requirement_text.startswith(f"{package_name}>=")
+        )
+        return min(Version(specifier.version) for specifier in requirement.specifier)
+
+    dependency_floors = {
+        "boto3": dependency_floor("boto3"),
+        "requests": dependency_floor("requests"),
+    }
+
+    requirement_paths = [COMMON_REQUIREMENTS] + [
+        requirements_path_for(definition.name) for definition in SERVICE_DEFINITIONS
+    ]
+    for requirement_path in requirement_paths:
+        for line in requirement_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            requirement = Requirement(stripped)
+            minimum_version = dependency_floors.get(requirement.name)
+            if minimum_version is None:
+                continue
+
+            matching_specifiers = [
+                specifier
+                for specifier in requirement.specifier
+                if specifier.operator in {">=", "==", "~="}
+            ]
+            if not matching_specifiers:
+                continue
+
+            lowest_allowed = min(
+                Version(specifier.version) for specifier in matching_specifiers
+            )
+            assert lowest_allowed >= minimum_version, requirement_path.as_posix()
+
+
 def test_build_secret_payload_collects_only_supported_keys() -> None:
     from nook.deploy.aws.secret_bootstrap import build_secret_payload
 
     payload = build_secret_payload(
         {
-            "GEMINI_API_KEY": "gemini",
+            "OPENAI_API_KEY": "openai",
             "REDDIT_CLIENT_ID": "reddit-client",
             "UNRELATED_KEY": "ignored",
         }
     )
 
     assert payload == {
-        "GEMINI_API_KEY": "gemini",
+        "OPENAI_API_KEY": "openai",
         "REDDIT_CLIENT_ID": "reddit-client",
     }
 
@@ -107,7 +173,7 @@ def test_upsert_runtime_secret_creates_when_missing() -> None:
     secret_id = upsert_runtime_secret(
         env={
             "NOOK_AWS_SECRET_ID": "my-nook/runtime-secrets",
-            "GEMINI_API_KEY": "gemini",
+            "OPENAI_API_KEY": "openai",
         },
         secrets_client=client,
     )
@@ -116,7 +182,7 @@ def test_upsert_runtime_secret_creates_when_missing() -> None:
     assert client.created == [
         (
             "my-nook/runtime-secrets",
-            json.dumps({"GEMINI_API_KEY": "gemini"}, sort_keys=True),
+            json.dumps({"OPENAI_API_KEY": "openai"}, sort_keys=True),
         )
     ]
     assert client.updated == []
@@ -129,7 +195,7 @@ def test_upsert_runtime_secret_updates_existing_secret() -> None:
     secret_id = upsert_runtime_secret(
         env={
             "NOOK_AWS_SECRET_ID": "my-nook/runtime-secrets",
-            "GEMINI_API_KEY": "gemini",
+            "OPENAI_API_KEY": "openai",
             "REDDIT_CLIENT_ID": "reddit-client",
         },
         secrets_client=client,
@@ -142,7 +208,7 @@ def test_upsert_runtime_secret_updates_existing_secret() -> None:
             "my-nook/runtime-secrets",
             json.dumps(
                 {
-                    "GEMINI_API_KEY": "gemini",
+                    "OPENAI_API_KEY": "openai",
                     "REDDIT_CLIENT_ID": "reddit-client",
                 },
                 sort_keys=True,
@@ -161,7 +227,7 @@ def test_upsert_runtime_secret_rejects_creating_missing_arn_secret() -> None:
                     "arn:aws:secretsmanager:ap-northeast-1:123456789012:"
                     "secret:my-nook/runtime-secrets"
                 ),
-                "GEMINI_API_KEY": "gemini",
+                "OPENAI_API_KEY": "openai",
             },
             secrets_client=FakeSecretsManagerClient(),
         )
@@ -188,8 +254,8 @@ def test_build_command_env_merges_dotenv_without_overriding_process_env(
 
     (tmp_path / ".env").write_text(
         (
-            "GEMINI_API_KEY=from-dotenv\n"
-            "GEMINI_MODEL=gemini-2.5-flash\n"
+            "OPENAI_API_KEY=from-dotenv\n"
+            "LLM_MODEL=openai:gpt-5.2\n"
             "REDDIT_CLIENT_ID=from-dotenv\n"
         ),
         encoding="utf-8",
@@ -200,8 +266,8 @@ def test_build_command_env_merges_dotenv_without_overriding_process_env(
         base_env={"REDDIT_CLIENT_ID": "from-process"},
     )
 
-    assert env["GEMINI_API_KEY"] == "from-dotenv"
-    assert env["GEMINI_MODEL"] == "gemini-2.5-flash"
+    assert env["OPENAI_API_KEY"] == "from-dotenv"
+    assert env["LLM_MODEL"] == "openai:gpt-5.2"
     assert env["REDDIT_CLIENT_ID"] == "from-process"
 
 
@@ -213,7 +279,7 @@ def test_deploy_command_upserts_secret_with_dotenv_enriched_env(
     from nook.services.runtime import RuntimeSettings
 
     (tmp_path / ".env").write_text(
-        "GEMINI_API_KEY=from-dotenv\nGEMINI_MODEL=gemini-2.5-flash\n",
+        "OPENAI_API_KEY=from-dotenv\nLLM_MODEL=openai:gpt-5.2\n",
         encoding="utf-8",
     )
 
@@ -254,10 +320,10 @@ def test_deploy_command_upserts_secret_with_dotenv_enriched_env(
 
     aws_cli.main()
 
-    assert captured_env["GEMINI_API_KEY"] == "from-dotenv"
-    assert captured_env["GEMINI_MODEL"] == "gemini-2.5-flash"
+    assert captured_env["OPENAI_API_KEY"] == "from-dotenv"
+    assert captured_env["LLM_MODEL"] == "openai:gpt-5.2"
     assert run_calls
     assert run_calls[0][0] == ["cdk", "deploy"]
-    assert run_calls[0][1]["GEMINI_API_KEY"] == "from-dotenv"
-    assert run_calls[0][1]["GEMINI_MODEL"] == "gemini-2.5-flash"
+    assert run_calls[0][1]["OPENAI_API_KEY"] == "from-dotenv"
+    assert run_calls[0][1]["LLM_MODEL"] == "openai:gpt-5.2"
     assert run_calls[0][1]["NOOK_AWS_SECRET_ID"] == "synced-secret"

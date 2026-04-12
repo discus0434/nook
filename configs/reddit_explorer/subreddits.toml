@@ -1,8 +1,5 @@
-[[subreddits]]
-name = "StableDiffusion"
-
-[[subreddits]]
-name = "comfyui"
+# Sample configuration for Reddit Explorer.
+# Replace or add subreddits that match your interests.
 
 [[subreddits]]
 name = "LocalLLaMA"

@@ -39,15 +39,15 @@ Reddit、Hacker News、GitHub Trending、技術ブログ、学術論文など多
 ### 🔄 多様な情報源からの自動収集・要約
 - **Hacker News**: Hacker Newsから最新のテクノロジーニュースと議論を収集
 - **GitHub Trending**: GitHubで各言語ごとの人気リポジトリを取得
-- **Reddit**: r/MachineLearningなどのサブレディットから人気投稿を収集して要約
+- **Reddit**: 複数 subreddit から投稿を収集し、upvote が多い順に要約
 - **RSS**: 技術ブログなどのRSSフィードを監視し、更新があれば取得して要約
 - **Google Alerts**: 指定したキーワードに関するGoogle検索の新着結果を収集して要約
-- **arXiv論文**: HuggingFaceでキュレーションされた最新の学術論文を自動収集し、HTMLページがあれば論文ごと読んで要約
+- **arXiv論文**: Hugging Face papers API の upvote が多い論文から順に自動収集し、arXiv HTML ページを本文抽出して要約
 - **Product Hunt**: Product Huntから最新のプロダクト情報を収集
-- **Tech News**: TechCrunch (AI, Apps, Funding) と 36kr (AI, Apps, Funding関連) から記事を収集して要約
+- **Tech News**: `configs/tech_news/feed.toml` に定義した複数 RSS を横断し、feed ごとの任意 `keywords` フィルタを適用して記事を収集・要約
 
 ### 💬 インタラクティブなチャット機能
-- **フォローアップ質問**: 要約された内容について、さらに詳しく質問可能（グラウンディングあり）
+- **フォローアップ質問**: 要約された内容について、さらに詳しく質問可能（対応 LLM provider では built-in web search によるグラウンディングあり）
 
 ### 🌐 シンプルなWebインターフェース
 - **日付別整理**: 収集した情報を日付ごとに整理して表示
@@ -71,7 +71,8 @@ Reddit、Hacker News、GitHub Trending、技術ブログ、学術論文など多
   - Codex ベースの PR 作成・レビュー対応に使用します。
 - Python 3.11
 - 以下のAPIキー:
-  - Google Gemini API キー（有償）
+  - 利用する LLM provider の API キー
+    - 例: `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`
   - Reddit API キー（クライアントID、クライアントシークレット）
   - Product Hunt API Key
   - Product Hunt Developer Token
@@ -98,8 +99,11 @@ Reddit、Hacker News、GitHub Trending、技術ブログ、学術論文など多
    ```
    `.env` に以下の値を設定
    ```dotenv
-   GEMINI_API_KEY=your_gemini_api_key
-   GEMINI_MODEL=gemini-2.5-flash
+   LLM_MODEL=openai:gpt-5.2
+   OPENAI_API_KEY=your_openai_api_key
+   # If you use another provider, set the matching API key instead.
+   # GOOGLE_API_KEY=your_google_api_key
+   # ANTHROPIC_API_KEY=your_anthropic_api_key
    REDDIT_CLIENT_ID=your_reddit_client_id
    REDDIT_CLIENT_SECRET=your_reddit_client_secret
    REDDIT_USER_AGENT=your_reddit_user_agent
@@ -165,12 +169,15 @@ graph TD
 
 - core logic は `nook/services/` に集約されています。
 - AWS 側は `nook/deploy/aws/handlers/` と `nook/deploy/aws/stack.py` が担当します。
-- AWS runtime credential は Secrets Manager から解決し、Lambda environment には runtime metadata と secret identifier に加えて必須の `GEMINI_MODEL` を渡します。
+- AWS runtime credential は Secrets Manager から解決し、Lambda environment には runtime metadata と secret identifier に加えて必須の `LLM_MODEL` を渡します。
+- provider の API key は `OPENAI_API_KEY` などの `*_API_KEY` として local / deploy 時に扱い、AWS runtime では Secrets Manager から process env へ注入します。
 - local 側は `nook/deploy/local/cli.py` が manifest 生成、register/unregister、viewer 起動、collector 起動を担当します。
 - local service manifest は absolute `uv` path を保持し、systemd collector は `TimeoutStartSec=15min` で実行します。
 - collector / viewer は共通の storage abstraction を通して、local では filesystem backend、AWS では S3 backend を使います。
-- Gemini のモデル指定は `.env` の `GEMINI_MODEL` が必須で、local / AWS の両方で同じ値を使います。未設定なら fail-fast します。
-- Gemini summary が書式に依存する collector では、model からは structured output を受け取り、アプリ側 renderer が Markdown に整形します。現時点では `paper_summarizer` と `reddit_explorer` がこの経路です。
+- `LLM_MODEL` には PydanticAI の provider/model string をそのまま渡します。local / AWS の両方で同じ値を使い、未設定なら fail-fast します。
+- viewer の follow-up chat search は provider built-in web search を使います。非対応 provider では検索 tool を付けず、通常の chat として動作します。
+- structured output を使う collector では、model からは Pydantic schema を受け取り、アプリ側 renderer が Markdown に整形します。現時点では `paper_summarizer` と `reddit_explorer` がこの経路です。
+- `paper_summarizer` は Hugging Face papers API の upvotes が多い paper から順に処理し、`reddit_explorer` は収集した post 全体を upvotes 降順に並べてから出力します。
 - TOML ベースの collector 設定は package 内ではなく `configs/<service>/` 配下に置き、runtime では共通 loader から参照します。
 - viewer の retry は既存 Markdown の有無ではなく、更新時刻が進んだことを見て完了判定します。
 - viewer の chat は service 全体ではなく article 単位で動き、client が送る `article_id` / `date` をもとに server 側で対象 article を再解決します。`article_id` は article content fingerprint を種にした per-instance ID で、service/date ごとの state に保存して reload / retry 後も可能な限り再利用します。
@@ -180,11 +187,12 @@ graph TD
 
 ### 情報源の追加・変更
 
-各情報源は設定ファイルまたはコード内で管理されており、カスタマイズできます:
+このリポジトリに同梱している `configs/*.toml` は sample です。必要に応じて編集して使ってください:
 
 #### Reddit
 
 `configs/reddit_explorer/subreddits.toml` を編集して、収集するサブレディットを変更できます。
+出力順は subreddit ごとのまとまりではなく、収集できた post 全体を upvotes 降順に並べた順です。
 
 ```toml
 [[subreddits]]
@@ -221,38 +229,25 @@ url = "https://example.com/feed.xml"
 
 #### Tech News
 
-`nook/services/tech_news/service.py` 内の `Config` クラスを編集して、TechCrunch や 36kr のフィードURLやフィルタリングキーワードを変更できます。
+`configs/tech_news/feed.toml` は sample config です。公開版には TechCrunch-AI と 36Kr の例だけを同梱しているので、使う前に自分の feed に置き換えてください。各 feed は `name`、`url`、`feed_name_display` を持ち、`keywords` は任意です。`keywords` を指定した場合は RSS の title / summary / content に一致した記事だけを残し、省略した場合はキーワードフィルタなしで収集します。重複 URL は 1 件にまとめ、各 feed から最大 10 件/日を処理します。
 
-```python
-class Config:
-    # ... other settings ...
-    keywords_to_filter = [ # キーワードを追加・削除
-        "ai", "artificial intelligence", "app", "funding", "融资", "人工智能", "new keyword"
-    ]
+```toml
+[[feeds]]
+name = "TechCrunch-AI"
+url = "https://techcrunch.com/category/artificial-intelligence/feed/"
+feed_name_display = "TechCrunch AI"
 
-    feeds: list[FeedConfig] = [
-        {
-            "name": "TechCrunch-AI",
-            "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
-            "keywords": None,
-            "feed_name_display": "TechCrunch AI"
-        },
-        # 他のTechCrunchフィード...
-        {
-            "name": "36Kr-News",
-            "url": "https://36kr.com/feed-article",
-            "keywords": keywords_to_filter, # キーワードフィルタを適用
-            "feed_name_display": "36Kr"
-        },
-        # 新しいフィードを追加
-        # {
-        #     "name": "NewSource-Topic",
-        #     "url": "https://newsource.com/topic/feed",
-        #     "keywords": keywords_to_filter, # または None
-        #     "feed_name_display": "New Source Topic"
-        # },
-    ]
+[[feeds]]
+name = "36Kr"
+url = "https://36kr.com/feed-article"
+feed_name_display = "36Kr"
+keywords = ["ai", "artificial intelligence", "funding", "machine learning"]
 
+[[feeds]]
+name = "NewSource-Topic"
+url = "https://newsource.com/topic/feed"
+feed_name_display = "New Source Topic"
+# keywords を省略するとキーワードフィルタなし
 ```
 
 #### Google Alerts
@@ -263,7 +258,7 @@ class Config:
 2.  目的のキーワードでアラートを作成します。
 3.  アラートのオプションで「配信先」を「RSSフィード」に設定します。
 4.  作成されたアラートの横にあるRSSアイコンをクリックし、表示されるフィードのURLをコピーします。
-5.  コピーしたURLを `configs/google_alerts/google_alerts.toml` に追加します。
+5.  同梱されている sample URL を、自分の RSS フィード URL に置き換えます。
 
 ```toml
 # 例:

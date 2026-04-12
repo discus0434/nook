@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
 
-# Add project root to path for imports (might still be needed for gemini_client if used later)
+# Add project root to path for imports.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Load environment variables from .env file in the project root

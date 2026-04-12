@@ -10,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from nook.services.collector_storage import CollectorStorage
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.storage import build_storage_backend
 
 _MARKDOWN_FORMAT = """
@@ -65,7 +65,7 @@ class HackerNewsRetriever:
         """
         HackerNewsRetriever の初期化。
 
-        Geminiクライアント、S3クライアント、バケット名を設定します。
+        LLM クライアント、storage backend を設定します。
         """
         self._client = create_client()
         self._storage = CollectorStorage(
@@ -132,7 +132,7 @@ class HackerNewsRetriever:
                 # URLのみの場合、リンク先の記事を要約
                 print(f"Retrieving and summarizing URL for story {story_id}: {url}")
                 summary = self._retrieve_and_summarize_url(url, title)
-                time.sleep(2)  # Gemini APIのレート制限対策
+                time.sleep(2)  # LLM API のレート制限対策
 
             # summaryがNoneのままの場合（テキストもURLもなく要約できなかった、またはエラー発生）はスキップしない
             # textフィールドには要約結果 or クレンジングされたHNテキスト or Noneが入る
@@ -233,7 +233,7 @@ class HackerNewsRetriever:
 
     def _summarize_content(self, title: str, text: str) -> str:
         """
-        与えられたタイトルとテキストをGemini APIで要約する。
+        与えられたタイトルとテキストを LLM で要約する。
 
         Parameters
         ----------

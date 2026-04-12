@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.runtime import JobInvoker, RuntimeSettings, build_job_invoker
 from nook.services.storage import StorageBackend, build_storage_backend
 from nook.services.viewer.chat import build_chat_prompt, collect_additional_context

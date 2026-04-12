@@ -1,5 +1,6 @@
 import concurrent.futures
 import inspect
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -8,23 +9,32 @@ from datetime import date, timedelta
 import arxiv
 import requests
 from bs4 import BeautifulSoup
+from pydantic import BaseModel
 from tqdm import tqdm
 
 from nook.services.collector_storage import CollectorStorage
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.paper_summarizer.summary_schema import (
     PaperSummarySections,
     render_paper_summary_markdown,
 )
 from nook.services.storage import build_storage_backend
 
+logger = logging.getLogger(__name__)
+
 
 class Config:
-    hugging_face_api_url_format = "https://huggingface.co/papers?date={date}"
+    hugging_face_api_url_format = "https://huggingface.co/api/papers?date={date}"
+    hugging_face_request_timeout_seconds = 30
     arxiv_id_regex = r"\d{4}\.\d{5}"
     arxiv_ids_s3_key_format = "arxiv_ids-{date}.txt"
     summary_index_s3_key_format = "paper_summarizer/{date}.md"
-    gemini_timeout_ms = 180000
+    llm_timeout_ms = 180000
+
+
+class HuggingFacePaper(BaseModel):
+    arxiv_id: str
+    upvotes: int
 
 
 @dataclass
@@ -37,40 +47,56 @@ class PaperInfo:
 
 
 class PaperIdRetriever:
-    def retrieve_from_hugging_face(self) -> list[str]:
+    def retrieve_from_hugging_face(self) -> list[HuggingFacePaper]:
         """
-        Retrieve the arXiv IDs of the papers curated by Hugging Face.
+        Retrieve the papers curated by Hugging Face.
 
         Returns
         -------
-        list[str]
-            The list of arXiv IDs, or [] if an error occurred.
+        list[HuggingFacePaper]
+            The list of arXiv papers and their upvotes.
         """
-        arxiv_ids = []
-        try:
-            response = requests.get(
-                url=Config.hugging_face_api_url_format.format(
-                    date=(date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        response = requests.get(
+            url=Config.hugging_face_api_url_format.format(
+                date=(date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+            ),
+            timeout=Config.hugging_face_request_timeout_seconds,
+        )
+        response.raise_for_status()
+
+        papers: list[HuggingFacePaper] = []
+        for item in response.json():
+            if not isinstance(item, dict):
+                logger.warning("skipping hugging face paper with invalid payload item")
+                continue
+
+            paper_id = item.get("id")
+            if not isinstance(paper_id, str):
+                logger.warning("skipping hugging face paper with invalid id")
+                continue
+            if not re.fullmatch(Config.arxiv_id_regex, paper_id):
+                logger.warning(
+                    "skipping hugging face paper with invalid id format",
+                    extra={"paper_id": paper_id},
                 )
-            )
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, "html.parser")
+                continue
 
-            for article in soup.find_all("article"):
-                for a in article.find_all("a"):
-                    href = a.get("href")
-                    if re.match(rf"^/papers/{Config.arxiv_id_regex}$", href):
-                        arxiv_ids.append(href.split("/")[-1])
+            upvotes = item.get("upvotes")
+            if not isinstance(upvotes, int):
+                logger.warning(
+                    "skipping hugging face paper with invalid upvote count",
+                    extra={"paper_id": paper_id},
+                )
+                continue
 
-        except requests.exceptions.RequestException as e:
-            print(f"Error when retrieving papers from Hugging Face: {e}")
+            papers.append(HuggingFacePaper(arxiv_id=paper_id, upvotes=upvotes))
 
-        return list(set(arxiv_ids))
+        return papers
 
 
 class PaperSummarizer:
     def __init__(self):
-        self._client = create_client(timeout=Config.gemini_timeout_ms)
+        self._client = create_client(timeout=Config.llm_timeout_ms)
         self._arxiv = arxiv.Client()
         self._storage = CollectorStorage(
             service_name="paper_summarizer",
@@ -81,8 +107,8 @@ class PaperSummarizer:
         self._old_arxiv_ids = self._load_old_arxiv_ids()
 
     def __call__(self) -> None:
-        new_arxiv_ids = self._paper_id_retriever.retrieve_from_hugging_face()
-        new_arxiv_ids = self._remove_duplicates(new_arxiv_ids)
+        papers = self._paper_id_retriever.retrieve_from_hugging_face()
+        new_arxiv_ids = self._select_new_arxiv_ids(papers)
 
         print(f"The number of new arXiv IDs: {len(new_arxiv_ids)}")
 
@@ -156,8 +182,17 @@ class PaperSummarizer:
             summary=paper_info.summary,
         )
 
-    def _remove_duplicates(self, new_arxiv_ids: list[str]) -> list[str]:
-        return list(set(new_arxiv_ids) - set(self._old_arxiv_ids))
+    def _select_new_arxiv_ids(self, papers: list[HuggingFacePaper]) -> list[str]:
+        selected_arxiv_ids: list[str] = []
+        seen_arxiv_ids = set(self._old_arxiv_ids)
+
+        for paper in sorted(papers, key=lambda paper: paper.upvotes, reverse=True):
+            if paper.arxiv_id in seen_arxiv_ids:
+                continue
+            seen_arxiv_ids.add(paper.arxiv_id)
+            selected_arxiv_ids.append(paper.arxiv_id)
+
+        return selected_arxiv_ids
 
     def _store_summaries(self, summaries: list[str]) -> None:
         wrote = self._storage.write_daily_markdown(summaries)

@@ -1,2 +1,4 @@
+# Sample configuration for GitHub Trending languages.
+# Replace or add entries to track the languages you care about.
 [[languages]]
 name = "python"

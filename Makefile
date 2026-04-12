@@ -46,18 +46,10 @@ post-change:
 	${MAKE} test
 
 spec-review:
-	@test -n "$(PROMPT)" || (echo "PROMPT is required" >&2; exit 1)
-	@OUTPUT=$${OUTPUT:-/tmp/spec-review.txt}; \
-	codex exec -s read-only -c model_reasoning_effort="medium" -C . \
-		--output-last-message "$$OUTPUT" \
-		"$$PROMPT"
+	./scripts/spec_review_runner.sh
 
 spec-implementation-review:
-	@test -n "$(PROMPT)" || (echo "PROMPT is required" >&2; exit 1)
-	@OUTPUT=$${OUTPUT:-/tmp/spec-implementation-review.txt}; \
-	codex exec -s read-only -c model_reasoning_effort="medium" -C . \
-		--output-last-message "$$OUTPUT" \
-		"$$PROMPT"
+	./scripts/spec_implementation_review_runner.sh
 
 prepare-common-lambda-assets:
 	@true

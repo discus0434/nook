@@ -24,6 +24,11 @@ CONFIG_CASES = [
         "subreddits",
         {"name"},
     ),
+    (
+        Path("configs/tech_news/feed.toml"),
+        "feeds",
+        {"name", "url", "feed_name_display"},
+    ),
 ]
 
 
@@ -47,3 +52,16 @@ def test_configuration_lists_have_required_fields(
         assert required_fields.issubset(item)
         for field in required_fields:
             assert item[field]
+
+
+def test_tech_news_keywords_are_non_empty_strings() -> None:
+    data = load_toml(Path("configs/tech_news/feed.toml"))
+
+    keyword_sets = [
+        feed.get("keywords") for feed in data["feeds"] if "keywords" in feed
+    ]
+
+    assert keyword_sets
+    for keywords in keyword_sets:
+        assert keywords
+        assert all(isinstance(keyword, str) and keyword for keyword in keywords)

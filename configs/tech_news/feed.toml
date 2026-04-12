@@ -1,0 +1,18 @@
+# Sample configuration for tech news feeds.
+# `keywords` is optional. When set, only entries matching the listed keywords
+# in title, summary, or content are kept.
+[[feeds]]
+name = "TechCrunch-AI"
+url = "https://techcrunch.com/category/artificial-intelligence/feed/"
+feed_name_display = "TechCrunch AI"
+
+[[feeds]]
+name = "36Kr"
+url = "https://36kr.com/feed-article"
+feed_name_display = "36Kr"
+keywords = [
+    "ai",
+    "artificial intelligence",
+    "funding",
+    "machine learning",
+]

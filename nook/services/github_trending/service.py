@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from nook.services.collector_storage import CollectorStorage
 from nook.services.config import load_service_toml
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.storage import build_storage_backend
 
 _MARKDOWN_FORMAT = """
@@ -230,7 +230,7 @@ class GithubTrending:
             return None
 
     def _summarize_repository(self, repository: Repository) -> str:
-        """Summarize the repository using Gemini API, considering description and README.
+        """Summarize the repository with the configured LLM, considering description and README.
 
         Parameters
         ----------

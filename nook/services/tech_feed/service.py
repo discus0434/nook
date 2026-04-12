@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from nook.services.collector_storage import CollectorStorage
 from nook.services.config import load_service_toml
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.storage import build_storage_backend
 
 _MARKDOWN_FORMAT = """

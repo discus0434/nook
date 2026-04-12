@@ -8,12 +8,14 @@ from botocore.exceptions import ClientError
 from nook.services.runtime_secrets import (
     AWS_RUNTIME_SECRET_ID_ENV,
     DEFAULT_AWS_RUNTIME_SECRET_ID,
-    RUNTIME_SECRET_KEYS,
+    is_runtime_secret_key,
 )
 
 
 def build_secret_payload(env: Mapping[str, str | None]) -> dict[str, str]:
-    return {key: value for key in RUNTIME_SECRET_KEYS if (value := env.get(key))}
+    return {
+        key: value for key, value in env.items() if value and is_runtime_secret_key(key)
+    }
 
 
 def upsert_runtime_secret(

@@ -13,20 +13,15 @@ license: See repository LICENSE
 
 ## 運用フロー
 
-1. `make spec-review PROMPT="<prompt>"` を実行する
+1. active spec を `specs/` に 1 件だけ置いたうえで `make spec-review` を実行する
 2. 返ってきた GAP / FIX をもとに spec を修正する
 3. 重要な曖昧さや不足が消えるまで繰り返す
 
-## プロンプト例
+## runner 前提
 
-```markdown
-You are a read-only spec-review agent. Do not modify files.
-1. Read the target spec in specs/.
-2. Check whether the goal, scope, files, modules, tests, docs updates, and verification steps are concrete enough to implement.
-3. Identify missing requirements, contradictions, risky assumptions, and over-engineering.
-4. Output OK / GAP / FIX with severity (Critical/Major/Minor/Info).
-5. Cite specific spec sections when possible.
-```
+- review prompt は `scripts/spec_review_runner.sh` に焼き込まれている。
+- runner は `specs/TEMPLATE.md` を除く `.md` が 1 件だけ存在する前提で動く。
+- 0 件または複数件ある場合は fail-fast する。
 
 ## チェックポイント
 

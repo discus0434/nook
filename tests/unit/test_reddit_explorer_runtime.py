@@ -132,21 +132,42 @@ def test_reddit_explorer_stores_rendered_markdown(monkeypatch) -> None:
     monkeypatch.setattr(
         reddit_service.Config,
         "load_subreddits",
-        classmethod(lambda cls: ["python"]),
+        classmethod(lambda cls: ["python", "MachineLearning"]),
     )
     monkeypatch.setattr(
         reddit_service.RedditExplorer,
         "_retrieve_hot_posts",
-        lambda self, subreddit: [
-            reddit_service.RedditPost(
-                type="text",
-                id="abc",
-                title=f"Interesting Post from {subreddit}",
-                url=None,
-                upvotes=123,
-                text="selftext",
-            )
-        ],
+        lambda self, subreddit: (
+            [
+                reddit_service.RedditPost(
+                    type="text",
+                    id="python-low",
+                    title="Python Low",
+                    url=None,
+                    upvotes=5,
+                    text="selftext",
+                ),
+                reddit_service.RedditPost(
+                    type="text",
+                    id="python-high",
+                    title="Python High",
+                    url=None,
+                    upvotes=80,
+                    text="selftext",
+                ),
+            ]
+            if subreddit == "python"
+            else [
+                reddit_service.RedditPost(
+                    type="text",
+                    id="ml-mid",
+                    title="ML Mid",
+                    url=None,
+                    upvotes=30,
+                    text="selftext",
+                )
+            ]
+        ),
     )
     monkeypatch.setattr(
         reddit_service.RedditExplorer,
@@ -161,8 +182,12 @@ def test_reddit_explorer_stores_rendered_markdown(monkeypatch) -> None:
     assert captured["response_schema"] is RedditPostSummary
     assert explorer._storage.separator == "\n---\n"
     assert explorer._storage.written_sections
-    assert explorer._storage.written_sections[0].startswith(
-        "# Interesting Post from python"
-    )
+    assert [
+        section.splitlines()[0] for section in explorer._storage.written_sections
+    ] == [
+        "# Python High",
+        "# ML Mid",
+        "# Python Low",
+    ]
     assert "## 2. 特に興味深いコメント" in explorer._storage.written_sections[0]
     assert "- comment" in explorer._storage.written_sections[0]

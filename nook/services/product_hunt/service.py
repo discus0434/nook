@@ -8,7 +8,7 @@ from gql import Client, gql
 from gql.transport.aiohttp import AIOHTTPTransport
 
 from nook.services.collector_storage import CollectorStorage
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.runtime_secrets import require_runtime_secret
 from nook.services.storage import build_storage_backend
 
@@ -30,7 +30,7 @@ class Config:
     product_hunt_oauth_url = "https://api.producthunt.com/v2/oauth/token"  # OAuth URL
     summary_index_s3_key_format = "product_hunt/{date}.md"
     min_votes_threshold: int = 20
-    gemini_api_sleep_seconds: float = 2.0
+    llm_api_sleep_seconds: float = 2.0
     product_hunt_api_sleep_seconds: float = 0.5
     graphql_fetch_limit: int = 50
     summary_max_chars: int = 50
@@ -51,7 +51,7 @@ class Product:
     tagline : str
         製品のキャッチフレーズ。
     description : str | None
-        製品の説明（Geminiによる要約）。
+        製品の説明（LLM による要約）。
     website : str
         Product Hunt上の製品ページURL。
     votes_count : int
@@ -79,7 +79,7 @@ class ProductHuntRetriever:
         ProductHuntRetriever の初期化。
         """
         self._developer_token = require_runtime_secret("PRODUCT_HUNT_DEVELOPER_TOKEN")
-        self._gemini_client = create_client()
+        self._llm_client = create_client()
         self._storage = CollectorStorage(
             service_name="product_hunt",
             backend=build_storage_backend(os.environ),
@@ -144,17 +144,17 @@ class ProductHuntRetriever:
                 f"Processing product: {node.get('name')} (Votes: {node.get('votesCount')})"
             )
 
-            # Geminiで説明文を生成
+            # LLM で説明文を生成
             # Use description if available, otherwise fallback to tagline
             content_to_summarize = node.get("description") or node.get("tagline")
             if not content_to_summarize:
                 summary = "No description or tagline provided."
             else:
-                # Assuming _summarize_product is sync and interacts with Gemini client (which might be sync)
+                # _summarize_product is synchronous and uses the shared LLM client.
                 summary = self._summarize_product(
                     node.get("name", "No Name"), content_to_summarize
                 )
-                await asyncio.sleep(Config.gemini_api_sleep_seconds)  # Use config value
+                await asyncio.sleep(Config.llm_api_sleep_seconds)  # Use config value
 
             products.append(
                 Product(
@@ -249,7 +249,7 @@ class ProductHuntRetriever:
 ```
 """  # Limit input length using config
         try:
-            return self._gemini_client.generate_content(
+            return self._llm_client.generate_content(
                 contents=prompt,
                 # Update system instruction for clarity
                 system_instruction=f"あなたはProduct Huntのランキングに登録された製品の概要を簡潔に説明するアシスタントです。説明は{Config.summary_max_chars}字程度に収めてください。",

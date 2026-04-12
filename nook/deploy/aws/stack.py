@@ -69,7 +69,7 @@ class NookStack(Stack):
         viewer_environment = build_runtime_environment(
             bucket_name=s3_bucket.bucket_name,
             runtime_secret_id=config.runtime_secret_id,
-            gemini_model=config.gemini_model,
+            llm_model=config.llm_model,
         )
         viewer_invoke_policy = iam.PolicyStatement(
             actions=["lambda:InvokeFunction"],
@@ -89,7 +89,7 @@ class NookStack(Stack):
                 environment=build_runtime_environment(
                     bucket_name=s3_bucket.bucket_name,
                     runtime_secret_id=config.runtime_secret_id,
-                    gemini_model=config.gemini_model,
+                    llm_model=config.llm_model,
                 ),
                 memory_size=MEMORY_SIZES.get(definition.name, 128),
                 timeout=Duration.seconds(TIMEOUT_SECONDS.get(definition.name, 900)),

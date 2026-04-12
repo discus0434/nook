@@ -6,14 +6,16 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from typing import Any, TypedDict
+from typing import Any
 
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+from pydantic import BaseModel
 
 from nook.services.collector_storage import CollectorStorage
-from nook.services.gemini_client import create_client
+from nook.services.config import load_service_toml
+from nook.services.llm_client import create_client
 from nook.services.storage import build_storage_backend
 
 _MARKDOWN_FORMAT = """
@@ -25,11 +27,11 @@ _MARKDOWN_FORMAT = """
 """
 
 
-class FeedConfig(TypedDict):
+class FeedConfig(BaseModel):
     name: str
     url: str
-    keywords: list[str] | None
     feed_name_display: str
+    keywords: list[str] | None = None
 
 
 class Config:
@@ -37,88 +39,16 @@ class Config:
     summary_index_s3_key_format = "tech_news/{date}.md"
     threshold_days = 1
     max_chars = 25000
-    keywords_to_filter = [
-        "ai",
-        "artificial intelligence",
-        "人工智能",
-        "大模型",
-        "机器学习",
-        "aigc",
-        "智能",
-        "app",
-        "应用",
-        "移动应用",
-        "小程序",
-        "软件",
-        "平台",
-        "游戏",
-        "游戏应用",
-        "游戏软件",
-        "游戏平台",
-        "funding",
-        "融资",
-        "投资",
-        "轮融资",
-        "种子轮",
-        "天使轮",
-        "ipo",
-        "上市",
-        "估值",
-        "vc",
-        "风险投资",
-        "募资",
-        "资本",
-        "llm",
-        "machine learning",
-        "seed round",
-        "angel round",
-        "series a",
-        "series b",
-        "series c",
-        "valuation",
-        "venture capital",
-        "fundraising",
-        "capital",
-    ]
 
-    feeds: list[FeedConfig] = [
-        {
-            "name": "TechCrunch-AI",
-            "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
-            "keywords": None,
-            "feed_name_display": "TechCrunch AI",
-        },
-        {
-            "name": "TechCrunch-Apps",
-            "url": "https://techcrunch.com/category/apps/feed/",
-            "keywords": None,
-            "feed_name_display": "TechCrunch Apps",
-        },
-        {
-            "name": "TechCrunch-Funding",
-            "url": "https://techcrunch.com/tag/funding/feed/",
-            "keywords": None,
-            "feed_name_display": "TechCrunch Funding",
-        },
-        {
-            "name": "36Kr",
-            "url": "https://36kr.com/feed-article",
-            "keywords": keywords_to_filter,
-            "feed_name_display": "36Kr",
-        },
-        {
-            "name": "IndiaTVNews-Business",
-            "url": "https://www.indiatvnews.com/rssnews/topstory-business.xml",
-            "keywords": None,
-            "feed_name_display": "IndiaTVNews Business",
-        },
-        {
-            "name": "IndiaTVNews-Technology",
-            "url": "https://www.indiatvnews.com/rssnews/topstory-technology.xml",
-            "keywords": None,
-            "feed_name_display": "IndiaTVNews Technology",
-        },
-    ]
+    @classmethod
+    def load_feeds(cls) -> list[FeedConfig]:
+        feed_data = load_service_toml("tech_news", "feed.toml")
+        feeds = [FeedConfig.model_validate(feed) for feed in feed_data.get("feeds", [])]
+        if not feeds:
+            raise ValueError(
+                "configs/tech_news/feed.toml must define at least one feed"
+            )
+        return feeds
 
 
 @dataclass
@@ -140,42 +70,36 @@ class TechNews:
             backend=build_storage_backend(os.environ),
         )
         self._threshold = datetime.now() - timedelta(days=Config.threshold_days)
-        self._feeds = Config.feeds
-        self._keywords_pattern = re.compile(
-            "|".join(Config.keywords_to_filter),
-            re.IGNORECASE,
-        )
+        self._feeds = Config.load_feeds()
 
     def __call__(self) -> None:
         markdowns = []
         processed_urls = set()
         for feed_config in self._feeds:
-            print(f"Processing feed: {feed_config['name']} ({feed_config['url']})")
+            print(f"Processing feed: {feed_config.name} ({feed_config.url})")
             feed_parser: feedparser.FeedParserDict = feedparser.parse(
-                feed_config["url"],
+                feed_config.url,
             )
-            entries = self._filter_entries(feed_parser, feed_config["keywords"])
+            entries = self._filter_entries(feed_parser, feed_config.keywords)
 
             # feedparserで取得できなかった場合、手動パースにフォールバック
             if len(entries) == 0 and len(feed_parser.entries) == 0:
                 print(
-                    f"Feedparser returned no entries for {feed_config['name']}, trying manual parsing..."
+                    f"Feedparser returned no entries for {feed_config.name}, trying manual parsing..."
                 )
-                entries = self._manual_parse_feed(
-                    feed_config["url"], feed_config["keywords"]
-                )
+                entries = self._manual_parse_feed(feed_config.url, feed_config.keywords)
                 if len(entries) > 0:
                     print(
-                        f"Manual parsing found {len(entries)} entries for {feed_config['name']}"
+                        f"Manual parsing found {len(entries)} entries for {feed_config.name}"
                     )
 
             if len(entries) > Config.max_entries_per_feed:
                 print(
-                    f"Limiting entries for {feed_config['name']} from {len(entries)} to {Config.max_entries_per_feed}",
+                    f"Limiting entries for {feed_config.name} from {len(entries)} to {Config.max_entries_per_feed}",
                 )
                 entries = entries[: Config.max_entries_per_feed]
 
-            print(f"Found {len(entries)} relevant entries for {feed_config['name']}.")
+            print(f"Found {len(entries)} relevant entries for {feed_config.name}.")
             for entry in entries:
                 try:
                     url = entry.get("link", "").split("?")[0]
@@ -185,7 +109,7 @@ class TechNews:
 
                     article = self._retrieve_article(
                         entry,
-                        feed_name=feed_config["feed_name_display"],
+                        feed_name=feed_config.feed_name_display,
                     )
                     if not article:
                         continue
@@ -207,6 +131,7 @@ class TechNews:
         keywords: list[str] | None,
     ) -> list[dict[str, Any]]:
         filtered_entries = []
+        keywords_pattern = self._compile_keywords_pattern(keywords)
         for entry in feed_parser["entries"]:
             date_ = entry.get("date_parsed") or entry.get("published_parsed")
             if not date_:
@@ -222,16 +147,10 @@ class TechNews:
             if published_dt <= self._threshold:
                 continue
 
-            if keywords:
-                title = entry.get("title", "")
-                summary = entry.get("summary_detail", {}).get("value", "")
-                content = entry.get("content", [{}])[0].get("value", "")
-
-                search_text = f"{title} {summary} {content}".lower()
-
-                if not self._keywords_pattern.search(search_text):
+            if keywords_pattern:
+                if not keywords_pattern.search(self._search_text(entry)):
                     continue
-                print(f"Keyword match found for: {title}")
+                print(f"Keyword match found for: {entry.get('title', '')}")
 
             filtered_entries.append(entry)
 
@@ -256,6 +175,7 @@ class TechNews:
             print(f"Manual parsing found {len(items)} raw items")
 
             filtered_entries = []
+            keywords_pattern = self._compile_keywords_pattern(keywords)
 
             for item in items:
                 # feedparser互換のエントリー構造を作成
@@ -298,10 +218,8 @@ class TechNews:
                     entry["content"] = [{"value": entry["summary_detail"]["value"]}]
 
                 # キーワードフィルタリング
-                if keywords:
-                    search_text = f"{entry.get('title', '')} {entry.get('summary_detail', {}).get('value', '')} {entry.get('content', [{}])[0].get('value', '')}".lower()
-
-                    if not self._keywords_pattern.search(search_text):
+                if keywords_pattern:
+                    if not keywords_pattern.search(self._search_text(entry)):
                         continue
                     print(
                         f"Keyword match found in manual parse: {entry.get('title', '')[:50]}"
@@ -430,6 +348,22 @@ class TechNews:
 
         print(f"Stored {len(summaries)} tech news summaries.")
 
+    @staticmethod
+    def _compile_keywords_pattern(
+        keywords: list[str] | None,
+    ) -> re.Pattern[str] | None:
+        if not keywords:
+            return None
+        escaped_keywords = [re.escape(keyword) for keyword in keywords]
+        return re.compile("|".join(escaped_keywords), re.IGNORECASE)
+
+    @staticmethod
+    def _search_text(entry: dict[str, Any]) -> str:
+        title = entry.get("title", "")
+        summary = entry.get("summary_detail", {}).get("value", "")
+        content = entry.get("content", [{}])[0].get("value", "")
+        return f"{title} {summary} {content}".lower()
+
     def _stylize_article(self, article: Article) -> str:
         summary_text = (
             article.summary
@@ -455,7 +389,7 @@ class TechNews:
                 )
 
             print(
-                f"Sending {len(truncated_text)} chars to Gemini for summarization: {article.url}",
+                f"Sending {len(truncated_text)} chars to LLM for summarization: {article.url}",
             )
             summary = self._client.generate_content(
                 contents=self._contents_format.format(

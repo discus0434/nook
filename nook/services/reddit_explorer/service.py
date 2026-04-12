@@ -8,7 +8,7 @@ import praw
 
 from nook.services.collector_storage import CollectorStorage
 from nook.services.config import load_service_toml
-from nook.services.gemini_client import create_client
+from nook.services.llm_client import create_client
 from nook.services.reddit_explorer.summary_schema import (
     RedditPostSummary,
     render_reddit_post_markdown,
@@ -65,15 +65,23 @@ class RedditExplorer:
 
     def __call__(self) -> None:
         markdowns = []
-        for subreddit in self._subreddits:
-            posts = self._retrieve_hot_posts(subreddit)
-            for post in posts:
-                post.comments = self._retrieve_top_comments_of_post(post.id)
-                post.summary = self._summarize_reddit_post(post)
-                markdowns.append(self._stylize_post(post))
-                time.sleep(5)
+        posts = self._collect_posts()
+        for post in self._sort_posts_by_upvotes(posts):
+            post.comments = self._retrieve_top_comments_of_post(post.id)
+            post.summary = self._summarize_reddit_post(post)
+            markdowns.append(self._stylize_post(post))
+            time.sleep(5)
 
         self._store_summaries(markdowns)
+
+    def _collect_posts(self) -> list[RedditPost]:
+        posts: list[RedditPost] = []
+        for subreddit in self._subreddits:
+            posts.extend(self._retrieve_hot_posts(subreddit))
+        return posts
+
+    def _sort_posts_by_upvotes(self, posts: list[RedditPost]) -> list[RedditPost]:
+        return sorted(posts, key=lambda post: post.upvotes, reverse=True)
 
     def _store_summaries(self, summaries: list[str]) -> None:
         wrote = self._storage.write_daily_markdown(summaries, separator="\n---\n")

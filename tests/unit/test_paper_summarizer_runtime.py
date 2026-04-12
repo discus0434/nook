@@ -1,4 +1,7 @@
-def test_paper_summarizer_uses_extended_gemini_timeout(
+import pytest
+
+
+def test_paper_summarizer_uses_extended_llm_timeout(
     monkeypatch,
 ) -> None:
     import nook.services.paper_summarizer.service as paper_service
@@ -30,7 +33,80 @@ def test_paper_summarizer_uses_extended_gemini_timeout(
 
     paper_service.PaperSummarizer()
 
-    assert captured_kwargs["timeout"] == 180000
+    assert captured_kwargs["timeout"] == paper_service.Config.llm_timeout_ms
+
+
+def test_paper_id_retriever_reads_hugging_face_api_payload(monkeypatch) -> None:
+    import nook.services.paper_summarizer.service as paper_service
+
+    requested: dict[str, object] = {}
+    warnings: list[str] = []
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[object]:
+            return [
+                "invalid-payload-item",
+                {"id": "1234.56789", "upvotes": 9},
+                {"id": "invalid-id", "upvotes": 99},
+                {"id": "3456.78901", "upvotes": "many"},
+                {"id": "2345.67890", "upvotes": 4},
+            ]
+
+    class _FixedDate:
+        @classmethod
+        def today(cls):
+            from datetime import date
+
+            return date(2026, 4, 12)
+
+    def fake_get(*, url: str, timeout: int) -> DummyResponse:
+        requested["url"] = url
+        requested["timeout"] = timeout
+        return DummyResponse()
+
+    monkeypatch.setattr(paper_service, "date", _FixedDate)
+    monkeypatch.setattr(paper_service.requests, "get", fake_get)
+    monkeypatch.setattr(
+        paper_service.logger,
+        "warning",
+        lambda message, *args, **kwargs: warnings.append(message),
+    )
+
+    papers = paper_service.PaperIdRetriever().retrieve_from_hugging_face()
+
+    assert requested["url"] == "https://huggingface.co/api/papers?date=2026-04-11"
+    assert requested["timeout"] == 30
+    assert papers == [
+        paper_service.HuggingFacePaper(arxiv_id="1234.56789", upvotes=9),
+        paper_service.HuggingFacePaper(arxiv_id="2345.67890", upvotes=4),
+    ]
+    assert warnings == [
+        "skipping hugging face paper with invalid payload item",
+        "skipping hugging face paper with invalid id format",
+        "skipping hugging face paper with invalid upvote count",
+    ]
+
+
+def test_paper_id_retriever_propagates_http_errors(monkeypatch) -> None:
+    import requests
+
+    import nook.services.paper_summarizer.service as paper_service
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            raise requests.HTTPError("boom")
+
+    monkeypatch.setattr(
+        paper_service.requests,
+        "get",
+        lambda *, url, timeout: DummyResponse(),
+    )
+
+    with pytest.raises(requests.HTTPError, match="boom"):
+        paper_service.PaperIdRetriever().retrieve_from_hugging_face()
 
 
 def test_paper_summarizer_uses_structured_summary_schema(monkeypatch) -> None:
@@ -67,7 +143,7 @@ def test_paper_summarizer_uses_structured_summary_schema(monkeypatch) -> None:
             return None
 
     class DummyPaperIdRetriever:
-        def retrieve_from_hugging_face(self) -> list[str]:
+        def retrieve_from_hugging_face(self) -> list[paper_service.HuggingFacePaper]:
             return []
 
     monkeypatch.setattr(paper_service, "create_client", lambda **kwargs: DummyClient())
@@ -143,8 +219,12 @@ def test_paper_summarizer_stores_rendered_markdown(monkeypatch) -> None:
             return True
 
     class DummyPaperIdRetriever:
-        def retrieve_from_hugging_face(self) -> list[str]:
-            return ["1234.56789"]
+        def retrieve_from_hugging_face(self) -> list[paper_service.HuggingFacePaper]:
+            return [
+                paper_service.HuggingFacePaper(arxiv_id="1234.56789", upvotes=3),
+                paper_service.HuggingFacePaper(arxiv_id="3456.78901", upvotes=20),
+                paper_service.HuggingFacePaper(arxiv_id="2345.67890", upvotes=12),
+            ]
 
     class DummyExecutor:
         def __init__(self, *, max_workers: int) -> None:
@@ -188,8 +268,54 @@ def test_paper_summarizer_stores_rendered_markdown(monkeypatch) -> None:
 
     assert captured["response_schema"] is PaperSummarySections
     assert summarizer._storage.written_sections
-    assert summarizer._storage.written_sections[0].startswith(
-        "# Structured Paper 1234.56789"
-    )
+    assert [
+        section.splitlines()[0] for section in summarizer._storage.written_sections
+    ] == [
+        "# Structured Paper 3456.78901",
+        "# Structured Paper 2345.67890",
+        "# Structured Paper 1234.56789",
+    ]
     assert "## 2. 結果、何が達成できたのか" in summarizer._storage.written_sections[0]
     assert "- results" in summarizer._storage.written_sections[0]
+
+
+def test_paper_summarizer_removes_seen_and_duplicate_papers_without_losing_order(
+    monkeypatch,
+) -> None:
+    import nook.services.paper_summarizer.service as paper_service
+
+    class DummyCollectorStorage:
+        def __init__(self, *, service_name: str, backend: object) -> None:
+            _ = backend
+            self.service_name = service_name
+
+        def read_state(self, key: str) -> str | None:
+            _ = key
+            return None
+
+    class DummyPaperIdRetriever:
+        def retrieve_from_hugging_face(self) -> list[paper_service.HuggingFacePaper]:
+            return []
+
+    monkeypatch.setattr(paper_service, "create_client", lambda **kwargs: object())
+    monkeypatch.setattr(paper_service, "CollectorStorage", DummyCollectorStorage)
+    monkeypatch.setattr(paper_service, "build_storage_backend", lambda env: object())
+    monkeypatch.setattr(paper_service.arxiv, "Client", lambda: object())
+    monkeypatch.setattr(paper_service, "PaperIdRetriever", DummyPaperIdRetriever)
+
+    summarizer = paper_service.PaperSummarizer()
+    summarizer._old_arxiv_ids = ["1234.56789"]
+
+    papers = [
+        paper_service.HuggingFacePaper(arxiv_id="1234.56789", upvotes=99),
+        paper_service.HuggingFacePaper(arxiv_id="3456.78901", upvotes=20),
+        paper_service.HuggingFacePaper(arxiv_id="2345.67890", upvotes=12),
+        paper_service.HuggingFacePaper(arxiv_id="3456.78901", upvotes=20),
+        paper_service.HuggingFacePaper(arxiv_id="4567.89012", upvotes=1),
+    ]
+
+    assert summarizer._select_new_arxiv_ids(papers) == [
+        "3456.78901",
+        "2345.67890",
+        "4567.89012",
+    ]

@@ -30,7 +30,7 @@ AGENT は以下の基本ルール、Python / CDK ルール、TDD / テスト実�
   - `from __future__ import annotations` は不要なので記述しない。
 - データモデルの定義に Pydantic を利用する。
 - `cdk.json` は `uv run python app.py` で CDK アプリを起動する前提とする。
-- CDK で必要な一時ファイル（`requirements-common.txt`, `gemini_client.py` のコピー）は `make cdk-*` で作成 / 削除し、手動で編集しない。
+- CDK で必要な一時ファイルや build asset は `make cdk-*` で作成 / 削除し、手動で編集しない。
 
 ### TDD / テストのルール
 
@@ -61,10 +61,10 @@ AGENT は以下の基本ルール、Python / CDK ルール、TDD / テスト実�
 
 1. 要件が曖昧ならユーザー確認を行い、実装に入る前に合意を取る。
 2. `specs/TEMPLATE.md` を雛形として技術仕様書を作成する。
-3. 必要なら `make spec-review PROMPT="..."` で仕様レビューを行い、曖昧さや欠落を潰す。
+3. 必要なら active spec を `specs/` に 1 件だけ置いたうえで `make spec-review` を実行し、曖昧さや欠落を潰す。
 4. TDD でテストを先に書き、最小実装を行う。
 5. `make post-change` で format / lint / pytest を通す。
-6. `make spec-implementation-review PROMPT="..."` で技術仕様書との差分を確認する。
+6. active spec を `specs/` に 1 件だけ置いたうえで `make spec-implementation-review` を実行し、技術仕様書との差分を確認する。
 7. 4. で作成されたテストをリファクタリングする。実装の詳細に密結合している脆いテストを削除し、振る舞いに焦点を当てた高品質なものへと改良する。
 7. ユーザー承認後、`docs/` を現況へ更新する。
 8. 今回のライフサイクルで作成した spec を `specs/` から削除する。spec は保存物ではなく、実装完了までの作業ファイルとして扱う。
